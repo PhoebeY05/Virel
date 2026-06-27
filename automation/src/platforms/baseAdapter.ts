@@ -4,7 +4,7 @@ import { throwIfVerificationRequired } from "../browser/safety";
 import { captureFailureScreenshot } from "../browser/screenshots";
 import { AccountSetup, BrowserChannel, PlatformAdapter, PlatformName, Post } from "../types/platform";
 import { AutomationError, UserVerificationRequiredError } from "../utils/errors";
-import { normalizeOptionalPath } from "../utils/fs";
+import { normalizeOptionalPath, resolveOptionalAssetPath } from "../utils/fs";
 import { waitForUserConfirmation } from "../utils/userPrompt";
 
 export interface PlatformDefinition {
@@ -202,7 +202,7 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     await this.fillFirstAvailable(["textarea[name='bio']", "textarea", "[contenteditable='true']"], this.setup.bio ?? "");
     await this.fillFirstAvailable(["input[name='website']", "input[type='url']"], this.setup.websiteUrl ?? "");
 
-    const profileImagePath = normalizeOptionalPath(this.setup.profileImagePath);
+    const profileImagePath = await resolveOptionalAssetPath(this.setup.profileImagePath);
     if (profileImagePath) {
       await this.uploadFirstAvailable(["input[type='file']"], profileImagePath);
     }

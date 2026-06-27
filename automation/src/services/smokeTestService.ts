@@ -10,7 +10,6 @@ const signupUrls: Record<PlatformName, string> = {
   tiktok: "https://www.tiktok.com/signup",
   telegram: "https://web.telegram.org/k/",
   xiaohongshu: "https://www.xiaohongshu.com/",
-  hacker_news: "https://news.ycombinator.com/login",
   producthunt: "https://www.producthunt.com/sign-up"
 };
 

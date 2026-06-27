@@ -5,7 +5,12 @@ export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
-  websiteUrl: z.string().url().optional()
+  target_audience: z.string().default(""),
+  goal: z.string().default(""),
+  status: z.string().default("draft"),
+  repo_url: z.string().url().nullable().optional(),
+  demo_url: z.string().url().nullable().optional(),
+  logo_url: z.string().url().nullable().optional()
 });
 
 export type Project = z.infer<typeof ProjectSchema>;
@@ -35,18 +40,11 @@ export const UserSettingsSchema = z.object({
   phone_number: z.string().default(""),
   country: z.string().default(""),
   timezone: z.string().default(""),
-  display_name: z.string().default(""),
-  brand_handle: z.string().default(""),
-  brand_bio: z.string().default(""),
   profile_image_url: z.string().nullable().optional(),
   backup_email: z.string().default(""),
   google_account_email: z.string().default(""),
   google_link_status: z.string().default("Not linked"),
   linkedin_url: z.string().default(""),
-  instagram_handle: z.string().default(""),
-  x_handle: z.string().default(""),
-  tiktok_handle: z.string().default(""),
-  reddit_username: z.string().default(""),
 });
 
 export type UserSettings = z.infer<typeof UserSettingsSchema>;

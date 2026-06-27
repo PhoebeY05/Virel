@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     )
     media_dir: str = "./media"
     frontend_url: AnyHttpUrl = "http://localhost:3000"
+    cors_origins: str | None = Field(
+        default=None,
+        description="Comma-separated list of extra allowed CORS origins",
+    )
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     auth_enabled: bool = False
@@ -25,6 +29,24 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    def get_cors_origins(self) -> list[str]:
+        origins = {
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            str(self.frontend_url).rstrip("/"),
+        }
+
+        if self.cors_origins:
+            origins.update(
+                origin.strip().rstrip("/")
+                for origin in self.cors_origins.split(",")
+                if origin.strip()
+            )
+
+        return sorted(origins)
 
 
 @lru_cache

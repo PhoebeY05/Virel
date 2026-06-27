@@ -289,7 +289,7 @@ def test_settings_endpoints(client: TestClient) -> None:
     response = client.get("/settings")
     assert response.status_code == 200
     body = response.json()
-    assert body["company_name"] == "Demo User"
+    assert body["company_name"] == ""
     assert body["support_email"] == "demo@virel.local"
 
     response = client.put(
@@ -332,7 +332,11 @@ def test_automation_connect_endpoint(client: TestClient) -> None:
     assert body["platform"] == "instagram"
     assert body["step"] == "connect_requested"
     assert body["payload"]["username"] == "@virel"
-    assert body["payload"]["company_name"] == "Demo User"
+    assert body["payload"]["company_name"] == "Virel"
+    assert body["payload"]["project_name"] == "Virel"
+    assert body["payload"]["project_description"] == "A launch operations workspace for student projects."
+    assert body["payload"]["project_demo_url"] == "https://virel.example.com"
+    assert body["payload"]["project_repo_url"] == "https://github.com/example/virel"
 
     response = client.get("/automation/sessions")
     assert response.status_code == 200
@@ -371,11 +375,11 @@ def test_automation_smoke_batch_endpoint(client: TestClient, monkeypatch: pytest
                     "holdMs": 5000,
                 },
                 {
-                    "platform": "hacker_news",
+                    "platform": "telegram",
                     "signupMethod": "email",
-                    "username": "studysnapai-hn",
+                    "username": "studysnapai-telegram",
                     "displayName": "StudySnap AI",
-                    "bio": "Testing the Hacker News launch flow.",
+                    "bio": "Testing the Telegram launch flow.",
                     "holdMs": 5000,
                 },
             ]
@@ -387,7 +391,7 @@ def test_automation_smoke_batch_endpoint(client: TestClient, monkeypatch: pytest
     assert body["status"] == "started"
     assert body["pid"] == 4321
     assert body["count"] == 2
-    assert body["platforms"] == ["instagram", "hacker_news"]
+    assert body["platforms"] == ["instagram", "telegram"]
     assert body["logPath"].startswith(str(automation_dir / "logs"))
 
     command = captured["command"]

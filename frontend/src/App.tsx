@@ -26,7 +26,7 @@ import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
 import { connectAutomation, getAutomationSessions, getPlatforms, resumeAutomationSession, startAutomationSmokeBatch } from './services/automation'
-import { createProjectAccount, getProjectAccounts } from './services/accounts'
+import { createProjectAccount, getProjectAccounts, type AccountInput } from './services/accounts'
 import { generateCampaign, getCampaign, getCampaigns, updateCampaign, type GenerateCampaignInput } from './services/campaigns'
 import { uploadImage } from './services/media'
 import { createProject, deleteProject, getProjects, updateProject, type ProjectInput } from './services/projects'
@@ -464,7 +464,7 @@ function ProjectsView() {
   const projects = projectsState.data ?? []
   const campaigns = campaignsState.data ?? []
   const automationSessions = automationSessionsState.data ?? []
-  const settings = settingsState.data
+  const settings = settingsState.data ?? null
   const filtered = useMemo(
     () =>
       projects.filter((project) => {
@@ -489,29 +489,16 @@ function ProjectsView() {
         const created = await createProject(input.project)
         projectsState.setData([created, ...projects])
         setIsCreating(false)
-        if (settings && input.launchPlatforms.length > 0) {
-          const preparedLaunches = input.launchPlatforms.map((platform) => {
-            const accountInput = buildPlatformAccountInput(created, settings, platform)
-            return {
-              platform,
-              signupMethod: 'email' as const,
-              email: settings.supportEmail || settings.backupEmail || settings.googleAccountEmail || undefined,
-              username: accountInput.username,
-              password: undefined,
-              displayName: settings.displayName || settings.companyName || created.name,
-              bio: accountInput.bio || settings.brandBio || created.description || created.tagline,
-              holdMs: 15_000,
-            }
-          })
-
+        if (input.launchPlatforms.length > 0) {
+          const preparedLaunches = input.launchPlatforms.map((platform) => buildProjectLaunchContext(created, settings, platform))
           await Promise.all(
-            input.launchPlatforms.map((platform) =>
+            preparedLaunches.map((launch) =>
               Promise.all([
-                createProjectAccount(created.id, buildPlatformAccountInput(created, settings, platform)),
+                createProjectAccount(created.id, launch.accountInput),
                 connectAutomation({
                   projectId: created.id,
-                  platform,
-                  payload: buildGuidedAutomationPayload(created, settings, platform),
+                  platform: launch.platform,
+                  payload: launch.automationPayload,
                 }),
               ]),
             ),
@@ -520,7 +507,17 @@ function ProjectsView() {
           setActionMessage(`Project created and ${input.launchPlatforms.length} platform account(s) prepared.`)
 
           try {
-            await startAutomationSmokeBatch({ runs: preparedLaunches })
+            await startAutomationSmokeBatch({
+              runs: preparedLaunches.map((launch) => ({
+                platform: launch.platform,
+                signupMethod: launch.signupMethod,
+                email: launch.email,
+                username: launch.username,
+                displayName: launch.displayName,
+                bio: launch.bio,
+                holdMs: 15_000,
+              })),
+            })
             setActionMessage(`Project created and browser setup launched for ${input.launchPlatforms.length} selected platform(s).`)
           } catch (browserError) {
             setActionError(browserError instanceof Error ? browserError.message : 'Browser launch failed.')
@@ -737,57 +734,78 @@ function normalizeAutomationUsername(projectName: string, platform: PlatformName
     .replace(/^_+|_+$/g, '') || 'virel'
 
   if (platform === 'Reddit') return `u/${slug}`
-  if (platform === 'Hacker News') return slug
   return `@${slug}`
 }
 
-function buildGuidedAutomationPayload(project: Project, settings: UserSettings, platform: PlatformName) {
-  return {
-    username: normalizeAutomationUsername(project.name, platform),
-    display_name: settings.displayName || project.name,
-    bio: settings.brandBio || project.description || project.tagline,
-    profile_image_url: settings.profileImageUrl || project.logoUrl || null,
-    account_url: resolvePlatformUrl(platform, null, project, settings),
-    company_name: settings.companyName || project.name,
-    legal_entity_name: settings.legalEntityName || project.name,
-    company_start_date: settings.companyStartDate,
-    website_url: settings.websiteUrl || '',
-    support_email: settings.supportEmail,
-    phone_number: settings.phoneNumber,
-    country: settings.country,
-    timezone: settings.timezone,
-    backup_email: settings.backupEmail,
-    google_account_email: settings.googleAccountEmail,
-    google_link_status: settings.googleLinkStatus,
-    brand_handle: settings.brandHandle,
-    brand_bio: settings.brandBio || project.description || project.tagline,
-    linkedin_url: settings.linkedinUrl,
-    instagram_handle: settings.instagramHandle,
-    x_handle: settings.xHandle,
-    tiktok_handle: settings.tiktokHandle,
-    reddit_username: settings.redditUsername,
-    project_name: project.name,
-    project_description: project.description || '',
-    project_goal: project.goal || '',
-    project_target_audience: project.targetAudience || '',
-  }
-}
-
-function buildPlatformAccountInput(project: Project, settings: UserSettings, platform: PlatformName) {
-  const bio = settings.brandBio || project.description || project.tagline
+function buildProjectLaunchContext(project: Project, settings: UserSettings | null, platform: PlatformName) {
   const username = normalizeAutomationUsername(project.name, platform)
+  const displayName = project.name
+  const bio = trimToLength(project.description || project.goal || project.targetAudience || project.tagline, 500)
   const accountUrl = resolvePlatformUrl(platform, null, project, settings)
+  const email = settings?.supportEmail || settings?.backupEmail || settings?.googleAccountEmail || undefined
+  const websiteUrl = settings?.websiteUrl || project.demoUrl || project.repoUrl || ''
+  const signupMethod = settings?.googleLinkStatus === 'Linked' && settings.googleAccountEmail ? 'google' : 'email'
 
   return {
     platform,
     username,
+    displayName,
     bio,
-    profileImageUrl: settings.profileImageUrl || project.logoUrl || null,
-    accountUrl,
-    status: 'Pending' as const,
-    notes: `Prepared for ${project.name} using saved brand defaults.`,
-    phoneRequired: platform === 'Instagram' || platform === 'LinkedIn' || platform === 'X' || platform === 'TikTok',
+    email,
+    signupMethod,
+    accountInput: {
+      platform,
+      username,
+      bio: bio || '',
+      profileImageUrl: settings?.profileImageUrl || project.logoUrl || null,
+      accountUrl,
+      status: 'Pending' as const,
+      notes: `Prepared for ${project.name} using saved settings and project details.`,
+      phoneRequired: platform === 'Instagram' || platform === 'LinkedIn' || platform === 'X' || platform === 'TikTok',
+    } satisfies AccountInput,
+    automationPayload: {
+      username,
+      display_name: displayName,
+      bio,
+      profile_image_url: settings?.profileImageUrl || project.logoUrl || null,
+      account_url: accountUrl,
+      company_name: project.name,
+      legal_entity_name: project.name,
+      company_start_date: settings?.companyStartDate || '',
+      website_url: websiteUrl,
+      support_email: email,
+      phone_number: settings?.phoneNumber || '',
+      country: settings?.country || '',
+      timezone: settings?.timezone || '',
+      backup_email: settings?.backupEmail || '',
+      google_account_email: settings?.googleAccountEmail || '',
+      google_link_status: settings?.googleLinkStatus || 'Not linked',
+      brand_handle: normalizeAutomationUsername(project.name, platform),
+      brand_bio: bio,
+      linkedin_url: settings?.linkedinUrl || '',
+      project_name: project.name,
+      project_description: project.description || '',
+      project_goal: project.goal || '',
+      project_target_audience: project.targetAudience || '',
+      project_repo_url: project.repoUrl || '',
+      project_demo_url: project.demoUrl || '',
+      project_logo_url: project.logoUrl || null,
+      signup_method: signupMethod,
+    },
   }
+}
+
+function buildGuidedAutomationPayload(project: Project, settings: UserSettings | null, platform: PlatformName) {
+  return buildProjectLaunchContext(project, settings, platform).automationPayload
+}
+
+function buildPlatformAccountInput(project: Project, settings: UserSettings | null, platform: PlatformName) {
+  return buildProjectLaunchContext(project, settings, platform).accountInput
+}
+
+function trimToLength(value: string | undefined, maxLength: number): string | undefined {
+  if (!value) return undefined
+  return value.length <= maxLength ? value : value.slice(0, maxLength).trimEnd()
 }
 
 function createEmptyUserSettings(): UserSettings {
@@ -800,18 +818,11 @@ function createEmptyUserSettings(): UserSettings {
     phoneNumber: '',
     country: '',
     timezone: '',
-    displayName: '',
-    brandHandle: '',
-    brandBio: '',
     profileImageUrl: '',
     backupEmail: '',
     googleAccountEmail: '',
     googleLinkStatus: 'Not linked',
     linkedinUrl: '',
-    instagramHandle: '',
-    xHandle: '',
-    tiktokHandle: '',
-    redditUsername: '',
     emailNotifications: true,
     defaultTone: 'Confident',
     themeMode: 'System',
@@ -1360,7 +1371,7 @@ function AutomationView() {
   const needsReviewCount = accounts.filter((account) => account.status === 'Needs verification' || account.status === 'Pending').length
 
   async function handlePrepareAccount(platform: PlatformName) {
-    if (!currentProject || !settings) return
+    if (!currentProject) return
     setActionError(null)
     setActionMessage(null)
     try {
@@ -1767,7 +1778,7 @@ function resolvePlatformUrl(platform: PlatformName, account: PlatformAccount | n
     .replace(/^u\//, '')
 
   if (platform === 'Instagram') {
-    const handle = normalizeHandle(settings?.instagramHandle || account?.username || slug)
+    const handle = normalizeHandle(account?.username || slug)
     return `https://www.instagram.com/${handle}/`
   }
   if (platform === 'Facebook') {
@@ -1775,23 +1786,22 @@ function resolvePlatformUrl(platform: PlatformName, account: PlatformAccount | n
     return `https://www.facebook.com/${handle}`
   }
   if (platform === 'X') {
-    const handle = normalizeHandle(settings?.xHandle || account?.username || slug)
+    const handle = normalizeHandle(account?.username || slug)
     return `https://x.com/${handle}`
   }
   if (platform === 'Reddit') {
-    const handle = normalizeHandle(settings?.redditUsername || account?.username || slug, 'u/')
+    const handle = normalizeHandle(account?.username || slug, 'u/')
     return `https://www.reddit.com/user/${handle.replace(/^u\//, '')}/`
   }
-  if (platform === 'LinkedIn') return settings?.linkedinUrl || 'https://www.linkedin.com/feed/'
+  if (platform === 'LinkedIn') return account?.accountUrl || 'https://www.linkedin.com/feed/'
   if (platform === 'TikTok') {
-    const handle = normalizeHandle(settings?.tiktokHandle || account?.username || slug)
+    const handle = normalizeHandle(account?.username || slug)
     return `https://www.tiktok.com/@${handle}`
   }
   if (platform === 'Telegram') {
     const handle = normalizeHandle(account?.username || slug)
     return `https://t.me/${handle}`
   }
-  if (platform === 'Hacker News') return 'https://news.ycombinator.com/'
   return 'https://www.linkedin.com/feed/'
 }
 
@@ -1809,7 +1819,6 @@ function isSocialAccountUrl(platform: PlatformName, url: string) {
   if (platform === 'LinkedIn') return normalized.includes('linkedin.com')
   if (platform === 'TikTok') return normalized.includes('tiktok.com')
   if (platform === 'Telegram') return normalized.includes('t.me') || normalized.includes('telegram.me')
-  if (platform === 'Hacker News') return normalized.includes('news.ycombinator.com')
   return false
 }
 
@@ -1826,25 +1835,14 @@ function SettingsView() {
   }, [settingsState.data])
 
   const requiredCount = [
-    draft.companyName,
-    draft.legalEntityName,
     draft.companyStartDate,
     draft.websiteUrl,
     draft.supportEmail,
     draft.phoneNumber,
     draft.country,
     draft.timezone,
-    draft.displayName,
-    draft.brandHandle,
-    draft.brandBio,
-    draft.profileImageUrl,
     draft.backupEmail,
     draft.googleAccountEmail,
-    draft.linkedinUrl,
-    draft.instagramHandle,
-    draft.xHandle,
-    draft.tiktokHandle,
-    draft.redditUsername,
   ].filter(Boolean).length
 
   function updateField<K extends keyof UserSettings>(key: K, value: UserSettings[K]) {
@@ -1878,17 +1876,11 @@ function SettingsView() {
         <SectionHeader
           eyebrow="Settings"
           title="Identity studio"
-          description="Store the business and identity details used across project setup and guided account creation."
+          description="Store the user-level contact and verification details used across account setup. Project branding now lives in the Projects tab."
         />
 
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
-          <SettingsCard title="Business profile">
-            <Field label="Company name" description="The public brand name shown on profiles and pages.">
-              <input className={inputField} value={draft.companyName} onChange={(event) => updateField('companyName', event.target.value)} />
-            </Field>
-            <Field label="Legal entity name" description="The registered company name used for verification.">
-              <input className={inputField} value={draft.legalEntityName} onChange={(event) => updateField('legalEntityName', event.target.value)} />
-            </Field>
+          <SettingsCard title="Operations">
             <Field label="Company start date" description="The date the business or project officially started.">
               <input className={inputField} type="date" value={draft.companyStartDate} onChange={(event) => updateField('companyStartDate', event.target.value)} />
             </Field>
@@ -1897,6 +1889,9 @@ function SettingsView() {
             </Field>
             <Field label="Support email" description="Use the inbox you want platform teams to contact.">
               <input className={inputField} value={draft.supportEmail} onChange={(event) => updateField('supportEmail', event.target.value)} />
+            </Field>
+            <Field label="Backup email" description="A recovery inbox if the primary account is locked.">
+              <input className={inputField} value={draft.backupEmail} onChange={(event) => updateField('backupEmail', event.target.value)} />
             </Field>
             <Field label="Phone number" description="The number used for verification or recovery.">
               <input className={inputField} value={draft.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} />
@@ -1909,28 +1904,6 @@ function SettingsView() {
                 <input className={inputField} value={draft.timezone} onChange={(event) => updateField('timezone', event.target.value)} />
               </Field>
             </div>
-          </SettingsCard>
-
-          <SettingsCard title="Brand identity">
-            <Field label="Display name" description="How the account name appears publicly.">
-              <input className={inputField} value={draft.displayName} onChange={(event) => updateField('displayName', event.target.value)} />
-            </Field>
-            <Field label="Primary handle" description="The default username you want to secure.">
-              <input className={inputField} value={draft.brandHandle} onChange={(event) => updateField('brandHandle', event.target.value)} />
-            </Field>
-            <Field label="Brand bio" description="A short summary of the project or company.">
-              <textarea className={textareaField} value={draft.brandBio} onChange={(event) => updateField('brandBio', event.target.value)} />
-            </Field>
-            <ImageUploadField
-              description="Upload the brand avatar shown across social accounts."
-              label="Profile image"
-              onChange={(value) => updateField('profileImageUrl', value)}
-              shape="circle"
-              value={draft.profileImageUrl}
-            />
-            <Field label="Backup email" description="A recovery inbox if the primary account is locked.">
-              <input className={inputField} value={draft.backupEmail} onChange={(event) => updateField('backupEmail', event.target.value)} />
-            </Field>
             <Field label="Default campaign tone" description="The default voice used for generated content.">
               <input className={inputField} value={draft.defaultTone} onChange={(event) => updateField('defaultTone', event.target.value)} />
             </Field>
@@ -1964,24 +1937,6 @@ function SettingsView() {
             </button>
           </SettingsCard>
 
-          <SettingsCard title="Platform handles">
-            <Field label="Instagram handle" description="Example: @virel">
-              <input className={inputField} value={draft.instagramHandle} onChange={(event) => updateField('instagramHandle', event.target.value)} />
-            </Field>
-            <Field label="X handle" description="Example: @virel">
-              <input className={inputField} value={draft.xHandle} onChange={(event) => updateField('xHandle', event.target.value)} />
-            </Field>
-            <Field label="TikTok handle" description="Example: @virel">
-              <input className={inputField} value={draft.tiktokHandle} onChange={(event) => updateField('tiktokHandle', event.target.value)} />
-            </Field>
-            <Field label="LinkedIn URL" description="The company page link used for verification or references.">
-              <input className={inputField} value={draft.linkedinUrl} onChange={(event) => updateField('linkedinUrl', event.target.value)} />
-            </Field>
-            <Field label="Reddit username" description="Example: u/VirelHQ">
-              <input className={inputField} value={draft.redditUsername} onChange={(event) => updateField('redditUsername', event.target.value)} />
-            </Field>
-          </SettingsCard>
-
           <SettingsCard title="Readiness">
             <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
               <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Required fields</p>
@@ -1989,7 +1944,7 @@ function SettingsView() {
               <p className="mt-2 text-sm leading-6 text-[#5f554a]">Core identity fields filled for account setup.</p>
             </div>
             <InfoBanner icon={ShieldCheck} title="Compliance first" description="Keep verification, CAPTCHA, and account approval with the user." />
-            <InfoBanner icon={BadgeCheck} title="One official identity" description="Use these fields to keep the brand consistent across platforms." />
+            <InfoBanner icon={BadgeCheck} title="Project owned branding" description="Keep brand name, bio, and avatar in the project record." />
           </SettingsCard>
 
           <SettingsCard title="Theme">
@@ -2241,15 +2196,15 @@ function ProjectModal({
             <div className="md:col-span-2 rounded-[28px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
               <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#7ea8ff]">Launch accounts</p>
               <p className="mt-2 text-sm leading-6 text-[#5f554a]">
-                Choose the social accounts to prepare now. Username defaults from the project name, and the rest comes from your saved settings.
+                Choose the social accounts to prepare now. Username defaults from the project name, and the rest comes from your saved settings and project details.
               </p>
               <div className="mt-4">
                 <PlatformChooser selected={launchPlatforms} onToggle={toggleLaunchPlatform} />
               </div>
               <p className="mt-3 text-xs leading-5 text-[#6b625a]">
                 {settings
-                  ? `Saved settings: ${settings.displayName || settings.companyName || 'ready'}`
-                  : 'Load settings to reuse brand defaults during account creation.'}
+                  ? `Saved settings: ${settings.supportEmail || settings.websiteUrl || 'ready'}`
+                  : 'Load settings to reuse contact defaults during account creation.'}
               </p>
             </div>
           )}

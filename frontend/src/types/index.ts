@@ -6,7 +6,6 @@ export type PlatformName =
   | 'X'
   | 'Facebook'
   | 'Telegram'
-  | 'Hacker News'
 
 export type ProjectStatus = 'Planning' | 'Active' | 'Paused' | 'Launched'
 export type PlatformStatus = 'Connected' | 'Pending' | 'Needs verification' | 'Error'
@@ -174,18 +173,11 @@ export interface UserSettings {
   phoneNumber: string
   country: string
   timezone: string
-  displayName: string
-  brandHandle: string
-  brandBio: string
   profileImageUrl: string
   backupEmail: string
   googleAccountEmail: string
   googleLinkStatus: GoogleLinkStatus
   linkedinUrl: string
-  instagramHandle: string
-  xHandle: string
-  tiktokHandle: string
-  redditUsername: string
   emailNotifications: boolean
   defaultTone: string
   themeMode: ThemeMode

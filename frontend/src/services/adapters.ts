@@ -160,7 +160,6 @@ const slugToName: Record<string, PlatformName> = {
   x: 'X',
   facebook: 'Facebook',
   telegram: 'Telegram',
-  hacker_news: 'Hacker News',
 }
 
 const nameToSlug = Object.fromEntries(

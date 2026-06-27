@@ -4,6 +4,7 @@ import { PublishingService } from "./services/publishingService";
 import { SessionResumeService } from "./services/sessionResumeService";
 import { SmokeTestService } from "./services/smokeTestService";
 import { AccountSetup, AccountSetupSchema, PlatformNameSchema, PostSchema } from "./types/platform";
+import { Account, Project, UserSettings } from "./types/backend";
 import { z } from "zod";
 
 const SmokeTestInputSchema = AccountSetupSchema.pick({
@@ -111,30 +112,69 @@ Commands:
 `);
 }
 
-async function buildAccountSetupFromBackend(backend: BackendClient, projectId: string, platform: z.infer<typeof PlatformNameSchema>): Promise<AccountSetup> {
-  const accounts = await backend.getProjectAccounts(projectId);
+async function buildAccountSetupFromBackend(
+  backend: BackendClient,
+  projectId: string,
+  platform: z.infer<typeof PlatformNameSchema>,
+): Promise<AccountSetup> {
+  const [project, accounts, settings] = await Promise.all([
+    backend.getProject(projectId),
+    backend.getProjectAccounts(projectId),
+    backend.getUserSettings(),
+  ]);
   const account = accounts.find((candidate) => candidate.platform === platform);
 
   if (!account) {
     throw new Error(`No ${platform} account found for project ${projectId}.`);
   }
 
-  const settings = await backend.getUserSettings();
+  return AccountSetupSchema.parse(buildAccountSetupInput(project, account, settings, platform));
+}
+
+function buildAccountSetupInput(
+  project: Project,
+  account: Account,
+  settings: UserSettings,
+  platform: z.infer<typeof PlatformNameSchema>,
+): AccountSetup {
+  const displayName = project.name;
+  const bio = trimToLength(firstNonEmpty(account.bio, project.description, project.goal, project.target_audience), 500);
+  const email = firstNonEmpty(settings.support_email, settings.backup_email, settings.google_account_email);
+  const websiteUrl = firstNonEmpty(settings.website_url, project.demo_url ?? undefined, project.repo_url ?? undefined);
+  const signupMethod = settings.google_link_status === "Linked" && settings.google_account_email ? "google" : "email";
 
   return {
-    projectId,
+    projectId: project.id,
     accountId: account.id,
     platform,
-    signupMethod: "email",
-    email: settings.support_email || settings.backup_email || settings.google_account_email || undefined,
+    signupMethod,
+    email,
     password: undefined,
-    displayName: settings.display_name || account.username,
+    displayName,
     username: account.username,
-    bio: account.bio || settings.brand_bio || "",
-    websiteUrl: settings.website_url || account.account_url || undefined,
-    profileImagePath: undefined,
-    bannerImagePath: undefined
+    bio,
+    websiteUrl,
+    profileImagePath: firstNonEmpty(project.logo_url ?? undefined, account.profile_image_url ?? undefined),
+    bannerImagePath: undefined,
   };
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | undefined {
+  for (const value of values) {
+    if (value && value.trim()) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function trimToLength(value: string | undefined, maxLength: number): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.length <= maxLength ? value : value.slice(0, maxLength).trimEnd();
 }
 
 main().catch((error) => {

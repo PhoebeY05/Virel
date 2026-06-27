@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: virel-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - backend/**
+        - automation/**
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://virel-frontend.onrender.com
+      - key: CORS_ORIGINS
+        value: https://virel-frontend.onrender.com
+      - key: AUTH_ENABLED
+        value: "false"
+      - key: CLERK_JWKS_URL
+        sync: false
+      - key: VIREL_AUTOMATION_DIR
+        value: /app/automation
+
+  - type: web
+    name: virel-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    buildFilter:
+      paths:
+        - frontend/**
+    envVars:
+      - key: VITE_API_URL
+        value: https://virel-backend.onrender.com

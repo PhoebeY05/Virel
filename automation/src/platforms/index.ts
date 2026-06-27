@@ -1,7 +1,6 @@
 import { BrowserManager } from "../browser/browserManager";
 import { AccountSetup, PlatformAdapter } from "../types/platform";
 import { FacebookAdapter } from "./facebook";
-import { HackerNewsAdapter } from "./hackerNews";
 import { InstagramAdapter } from "./instagram";
 import { LinkedinAdapter } from "./linkedin";
 import { ProductHuntAdapter } from "./producthunt";
@@ -29,8 +28,6 @@ export function createPlatformAdapter(setup: AccountSetup, browserManager: Brows
       return new TikTokAdapter(setup, browserManager);
     case "xiaohongshu":
       return new XiaohongshuAdapter(setup, browserManager);
-    case "hacker_news":
-      return new HackerNewsAdapter(setup, browserManager);
     case "producthunt":
       return new ProductHuntAdapter(setup, browserManager);
   }
