@@ -60,8 +60,13 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
       return;
     }
 
-    await this.fillSignupFields();
-    await this.pauseForUser("Review the signup details, submit them, and complete any verification.");
+    if (this.setup.signupMethod === "google") {
+      await this.startGoogleSignup();
+      await this.pauseForUser("Complete Google sign-in, then finish any platform verification or username steps.");
+    } else {
+      await this.fillSignupFields();
+      await this.pauseForUser("Review the signup details, submit them, and complete any verification.");
+    }
     await this.saveSession();
   }
 
@@ -159,6 +164,29 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     }
   }
 
+  protected async startGoogleSignup(): Promise<void> {
+    const clicked = await this.clickFirstAvailable([
+      "button:has-text('Continue with Google')",
+      "a:has-text('Continue with Google')",
+      "div[role='button']:has-text('Continue with Google')",
+      "button:has-text('Sign up with Google')",
+      "a:has-text('Sign up with Google')",
+      "div[role='button']:has-text('Sign up with Google')",
+      "button:has-text('Log in with Google')",
+      "a:has-text('Log in with Google')",
+      "div[role='button']:has-text('Log in with Google')",
+      "button:has-text('Google')",
+      "a:has-text('Google')",
+      "div[role='button']:has-text('Google')",
+      "[aria-label*='Google']",
+      "[data-testid*='google' i]"
+    ]);
+
+    if (!clicked) {
+      await this.pauseForUser("No Google signup option was visible. Continue the signup flow manually in this browser.");
+    }
+  }
+
   protected async gotoProfileEditor(): Promise<void> {
     await this.page.goto(this.definition.profileUrl ?? this.definition.homeUrl, { waitUntil: "domcontentloaded" });
   }
@@ -220,6 +248,18 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
       const locator = this.page.locator(selector).first();
       if ((await locator.count()) > 0) {
         await locator.setInputFiles(filePath);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  protected async clickFirstAvailable(selectors: string[]): Promise<boolean> {
+    for (const selector of selectors) {
+      const locator = this.page.locator(selector).first();
+      if (await locator.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        await locator.click();
         return true;
       }
     }

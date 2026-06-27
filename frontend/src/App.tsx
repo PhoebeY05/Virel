@@ -22,12 +22,27 @@ const platforms: Platform[] = [
   'producthunt',
 ]
 
+const manualGuidance: Partial<Record<Platform, string>> = {
+  reddit:
+    'Reddit may block automated signup browsers. Create or sign in to the Reddit account manually in your normal browser, then return to Virel for campaign setup.',
+  linkedin:
+    'LinkedIn uses stronger identity checks. Use your normal browser to sign up with Google, then return to Virel for branding and campaign setup.',
+  xiaohongshu:
+    'Xiaohongshu usually requires phone and regional verification. Complete signup manually, then return to Virel for branding and campaign setup.',
+}
+
 function App() {
   const [platform, setPlatform] = useState<Platform>('reddit')
   const [status, setStatus] = useState('Idle')
   const [isLaunching, setIsLaunching] = useState(false)
 
   async function launchAutomationTest() {
+    const guidance = manualGuidance[platform]
+    if (guidance) {
+      setStatus(guidance)
+      return
+    }
+
     setIsLaunching(true)
     setStatus('Starting automation...')
 
@@ -38,6 +53,7 @@ function App() {
         body: JSON.stringify({
           platform,
           email: 'team@example.com',
+          signupMethod: 'google',
           username: 'vireltestproject',
           password: 'ChangeMe123!',
           displayName: 'Virel Test Project',
@@ -52,7 +68,7 @@ function App() {
         throw new Error(data.detail ?? 'Automation failed to start')
       }
 
-      setStatus(`${data.message} PID: ${data.pid}`)
+      setStatus(`${data.message} PID: ${data.pid}${data.logPath ? ` Log: ${data.logPath}` : ''}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Something went wrong')
     } finally {
@@ -86,7 +102,7 @@ function App() {
           </select>
 
           <button type="button" onClick={launchAutomationTest} disabled={isLaunching}>
-            {isLaunching ? 'Launching...' : 'Launch test browser'}
+            {isLaunching ? 'Launching...' : manualGuidance[platform] ? 'Show manual guidance' : 'Launch Google sign-up'}
           </button>
 
           <div className="status" aria-live="polite">

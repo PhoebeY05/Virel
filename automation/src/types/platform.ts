@@ -17,6 +17,7 @@ export const AccountSetupSchema = z.object({
   projectId: z.string(),
   accountId: z.string().optional(),
   platform: PlatformNameSchema,
+  signupMethod: z.enum(["email", "google"]).default("google"),
   email: z.string().email().optional(),
   password: z.string().optional(),
   displayName: z.string(),
