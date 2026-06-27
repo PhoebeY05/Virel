@@ -13,8 +13,17 @@ services:
 
   backend:
     build: ./backend
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/virel
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FRONTEND_URL: http://localhost:3000
+      AUTH_ENABLED: "false"
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
     ports:
       - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   frontend:
     build:
