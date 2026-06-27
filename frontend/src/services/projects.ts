@@ -1,5 +1,6 @@
 import { projects as seedProjects } from '../mocks/data'
 import type { Project } from '../types'
+import { fromApiProject, toApiProject, type ApiProject } from './adapters'
 import { apiRequest } from './api'
 
 let projects = [...seedProjects]
@@ -8,7 +9,8 @@ const wait = (ms = 350) => new Promise((resolve) => window.setTimeout(resolve, m
 
 export async function getProjects(): Promise<Project[]> {
   try {
-    return await apiRequest<Project[]>('/projects')
+    const response = await apiRequest<ApiProject[]>('/projects')
+    return response.map(fromApiProject)
   } catch {
     await wait()
     return [...projects]
@@ -17,10 +19,11 @@ export async function getProjects(): Promise<Project[]> {
 
 export async function createProject(project: Omit<Project, 'id' | 'lastUpdated' | 'progress'>): Promise<Project> {
   try {
-    return await apiRequest<Project>('/projects', {
+    const response = await apiRequest<ApiProject>('/projects', {
       method: 'POST',
-      body: JSON.stringify(project),
+      body: JSON.stringify(toApiProject(project)),
     })
+    return { ...fromApiProject(response), platforms: project.platforms }
   } catch {
     await wait()
     const created: Project = {
@@ -36,10 +39,12 @@ export async function createProject(project: Omit<Project, 'id' | 'lastUpdated' 
 
 export async function updateProject(id: string, patch: Partial<Project>): Promise<Project> {
   try {
-    return await apiRequest<Project>(`/projects/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(patch),
+    const response = await apiRequest<ApiProject>(`/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(toApiProject(patch)),
     })
+    const existing = projects.find((project) => project.id === id)
+    return { ...fromApiProject(response), platforms: patch.platforms ?? existing?.platforms ?? [] }
   } catch {
     await wait()
     projects = projects.map((project) =>

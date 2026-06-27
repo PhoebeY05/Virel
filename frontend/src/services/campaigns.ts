@@ -1,5 +1,6 @@
 import { campaigns, platformNames } from '../mocks/data'
 import type { Campaign, CampaignDay, GeneratedPost, PlatformName } from '../types'
+import { fromApiCampaign, toPlatformSlug, type ApiCampaign } from './adapters'
 import { apiRequest } from './api'
 
 let campaignStore = [...campaigns]
@@ -7,7 +8,8 @@ const wait = (ms = 400) => new Promise((resolve) => window.setTimeout(resolve, m
 
 export async function getCampaigns(): Promise<Campaign[]> {
   try {
-    return await apiRequest<Campaign[]>('/campaigns')
+    const response = await apiRequest<ApiCampaign[]>('/campaigns')
+    return response.map(fromApiCampaign)
   } catch {
     await wait()
     return [...campaignStore]
@@ -22,10 +24,17 @@ export async function generateCampaign(input: {
   platforms: PlatformName[]
 }): Promise<Campaign> {
   try {
-    return await apiRequest<Campaign>('/campaigns/generate', {
+    const response = await apiRequest<ApiCampaign>('/campaigns/generate', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        project_id: input.projectId,
+        goal: input.goal,
+        platforms: input.platforms.map(toPlatformSlug),
+        title: `${input.projectName} generated launch`,
+        tone: 'confident',
+      }),
     })
+    return fromApiCampaign(response)
   } catch {
     await wait(600)
     const selectedPlatforms = input.platforms.length ? input.platforms : platformNames.slice(0, 4)
