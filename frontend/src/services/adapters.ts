@@ -386,9 +386,3 @@ function toPercent(value: number) {
   return value <= 1 ? Number((value * 100).toFixed(1)) : value
 }
 
-function defaultUsername(platform: PlatformName) {
-  if (platform === 'Reddit') return 'u/VirelHQ'
-  if (platform === 'Discord') return 'Virel Community'
-  if (platform === 'LinkedIn') return 'Virel'
-  return '@virel'
-}

@@ -1,8 +1,8 @@
+import { type ReactNode, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowRight,
   BadgeCheck,
-  BriefcaseBusiness,
   ChartColumn,
   ChevronRight,
   CircleDashed,
@@ -20,16 +20,20 @@ import {
   Sparkles,
   Trash2,
   UserRoundPlus,
-  Upload,
   WandSparkles,
 } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { platformNames } from './mocks/data'
+import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
-import { connectAutomation, createAutomationSession, getPlatforms } from './services/automation'
+import {
+  connectAutomation,
+  createAutomationSession,
+  getAutomationSessions,
+  getPlatforms,
+  launchAutomationSignup,
+  launchPublishBatch,
+} from './services/automation'
 import { generateCampaign, getCampaigns, type GenerateCampaignInput } from './services/campaigns'
-import { uploadImage } from './services/media'
 import { createProject, deleteProject, getProjects, updateProject, type ProjectInput } from './services/projects'
 import type {
   AutomationSession,
@@ -114,8 +118,13 @@ const primaryButton = `${buttonBase} bg-emerald-400 text-slate-950 hover:bg-emer
 const secondaryButton = `${buttonBase} border border-white/10 bg-white/5 text-slate-100 hover:border-white/20 hover:bg-white/10`
 const ghostButton = `${buttonBase} border border-transparent bg-transparent text-slate-300 hover:bg-white/5 hover:text-white`
 const cardClass = 'rounded-[28px] border border-white/10 bg-slate-950/75 p-6 shadow-[0_18px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl'
-const softCardClass = 'rounded-[24px] border border-white/10 bg-white/5 p-5'
-const panelClass = 'rounded-[32px] border border-white/10 bg-white/[0.03] p-6 shadow-[0_20px_90px_rgba(2,6,23,0.45)] backdrop-blur-xl'
+
+const automationGuidance: Partial<Record<PlatformName, string>> = {
+  LinkedIn: 'LinkedIn account setup is guidance-only because identity and verification checks are strongly enforced.',
+  Xiaohongshu: 'Xiaohongshu generally requires phone-based regional verification, so Virel keeps this as guided setup.',
+}
+
+const unsupportedSignupPlatforms: PlatformName[] = ['LinkedIn', 'Xiaohongshu']
 
 function App() {
   const [view, setView] = useState<View>('Dashboard')
@@ -687,7 +696,7 @@ function CampaignsView() {
   }
 
   async function handlePublishAssistant() {
-    if (!campaignPreview || !previewProject || campaignPreview.posts.length === 0) return
+    if (!campaignPreview || !selectedProject || campaignPreview.posts.length === 0) return
 
     setActionError(null)
     setPublishStatus('Starting multi-platform publishing assistant...')
@@ -695,11 +704,11 @@ function CampaignsView() {
 
     try {
       const result = await launchPublishBatch({
-        projectId: previewProject.id,
-        displayName: previewProject.name,
-        username: normalizeHandle(previewProject.name),
-        bio: previewProject.description || previewProject.tagline,
-        websiteUrl: previewProject.demoUrl ?? previewProject.repoUrl ?? undefined,
+        projectId: selectedProject.id,
+        displayName: selectedProject.name,
+        username: normalizeHandle(selectedProject.name),
+        bio: selectedProject.description || selectedProject.tagline,
+        websiteUrl: selectedProject.demoUrl ?? selectedProject.repoUrl ?? undefined,
         posts: campaignPreview.posts,
       })
       setPublishStatus(`${result.message} PID: ${result.pid}${result.logPath ? ` Log: ${result.logPath}` : ''}`)
@@ -756,8 +765,8 @@ function CampaignsView() {
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-200">Goal</span>
-                <input className={inputClass} value={goal} onChange={(event) => setGoal(event.target.value)} />
+                <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Goal</span>
+                <input className={inputField} value={goal} onChange={(event) => setGoal(event.target.value)} />
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -788,26 +797,26 @@ function CampaignsView() {
 
           <div className={`${paperCard} p-5`}>
             <SectionHeader eyebrow="Preview" title="Campaign reel" />
-            {previewCampaign ? (
+            {campaignPreview ? (
               <div className="mt-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-display text-3xl font-black tracking-tight text-[#1f1814]">{previewCampaign.name}</h3>
+                    <h3 className="font-display text-3xl font-black tracking-tight text-[#1f1814]">{campaignPreview.name}</h3>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-[#51463f]">
-                      {previewCampaign.summary || previewCampaign.audience || previewCampaign.goal}
+                      {campaignPreview.summary || campaignPreview.audience || campaignPreview.goal}
                     </p>
                   </div>
-                  <StatusBadge status={previewCampaign.status} />
+                  <StatusBadge status={campaignPreview.status} />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <MiniStat label="Project" value={selectedProject.name} />
-                  <MiniStat label="Platforms" value={previewCampaign.platforms.join(', ') || 'Not set'} />
-                  <MiniStat label="Tone" value={previewCampaign.tone || tone} />
+                  <MiniStat label="Platforms" value={campaignPreview.platforms.join(', ') || 'Not set'} />
+                  <MiniStat label="Tone" value={campaignPreview.tone || tone} />
                 </div>
 
                 <div className="grid gap-3">
-                  {previewCampaign.days.slice(0, 4).map((day) => (
+                  {campaignPreview.days.slice(0, 4).map((day) => (
                     <div key={day.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Day {day.day}</p>
@@ -825,10 +834,19 @@ function CampaignsView() {
                   <button className={secondaryButton} onClick={() => setGeneratedCampaign(campaignPreview)} type="button">
                     Keep preview
                   </button>
+                  <button
+                    className={secondaryButton}
+                    disabled={isPublishing || campaignPreview.posts.length === 0}
+                    onClick={() => void handlePublishAssistant()}
+                    type="button"
+                  >
+                    {isPublishing ? 'Starting assistant...' : 'Publish assistant'}
+                  </button>
                   <button className={ghostButton} onClick={() => setTitle('')} type="button">
                     Reset title
                   </button>
                 </div>
+                {publishStatus && <p className="text-sm font-medium text-[#1f1814]">{publishStatus}</p>}
               </div>
             ) : (
               <EmptyState title="No campaign yet." description="Generate one to see the plan expand." compact />
@@ -908,7 +926,7 @@ function AnalyticsView() {
   }
   if (!analytics) return <EmptyState title="No analytics available yet." description="Generate a campaign and the report cards will fill in." />
 
-  const topPosts = analytics.topPosts.slice(0, 4)
+  const recentPosts = analytics.topPosts.slice(0, 4)
 
   return (
     <div className="space-y-6">
@@ -921,7 +939,7 @@ function AnalyticsView() {
         <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricTile label="Projects" value={analytics.summary.totalProjects.toString()} icon={FolderKanban} tone="blue" />
           <MetricTile label="Campaigns" value={analytics.summary.activeCampaigns.toString()} icon={Sparkles} tone="yellow" />
-          <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={BarChart3} tone="green" />
+          <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={ChartColumn} tone="green" />
           <MetricTile label="CTR" value={`${analytics.summary.ctr}%`} icon={LineChart} tone="purple" />
         </div>
       </section>
@@ -980,7 +998,7 @@ function AnalyticsView() {
         </article>
 
         <article className={cardClass}>
-          <SectionHeading eyebrow="Recent posts" title="Generated content" />
+          <SectionHeader eyebrow="Recent posts" title="Generated content" />
           {recentPosts.length === 0 ? (
             <EmptyState title="No generated posts yet." description="Create a campaign to see posts here." compact />
           ) : (
@@ -989,13 +1007,15 @@ function AnalyticsView() {
                 <div key={post.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium text-white">{post.title}</span>
-                    <StatusPill status={post.status} />
+                    <StatusBadge status={post.platform} />
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">{post.content}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {formatNumber(post.likes)} likes, {formatNumber(post.comments)} comments, {formatNumber(post.shares)} shares
+                  </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                     <span>{post.platform}</span>
                     <span>•</span>
-                    <span>{post.engagementEstimate}% fit</span>
+                    <span>{formatNumber(post.engagement)} engagement</span>
                   </div>
                 </div>
               ))}
@@ -1017,6 +1037,8 @@ function AutomationView() {
   const [profileImageUrl, setProfileImageUrl] = useState('')
   const [accountUrl, setAccountUrl] = useState('')
   const [notes, setNotes] = useState('')
+  const [signupEmail, setSignupEmail] = useState('')
+  const [signupPassword, setSignupPassword] = useState('')
   const [sessions, setSessions] = useState<AutomationSession[]>([])
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [launchStatus, setLaunchStatus] = useState<string | null>(null)
@@ -1171,7 +1193,7 @@ function AutomationView() {
           </div>
 
           <div className={cardClass}>
-            <SectionHeading
+            <SectionHeader
               eyebrow="Connection brief"
               title={`Setup ${selectedPlatform.name}`}
               description="Fill in the brand details, then either queue the session or request a connect run."
@@ -1185,51 +1207,64 @@ function AutomationView() {
                     </option>
                   ))}
                 </select>
-              </label>
+              </Field>
 
-              <label className="block">
-                <span className="text-sm font-medium text-slate-200">Username</span>
-                <input className={inputClass} value={username} onChange={(event) => setUsername(event.target.value)} />
-              </label>
+              <Field label="Username">
+                <input className={inputField} value={username} onChange={(event) => setUsername(event.target.value)} />
+              </Field>
 
-              <label className="block">
-                <span className="text-sm font-medium text-slate-200">Account URL</span>
-                <input className={inputClass} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
-              </label>
+              <Field label="Account URL">
+                <input className={inputField} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
+              </Field>
 
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Bio</span>
-                <textarea className={textareaClass} value={bio} onChange={(event) => setBio(event.target.value)} />
-              </label>
+              <Field label="Signup email">
+                <input className={inputField} value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} />
+              </Field>
 
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Profile image URL</span>
+              <Field label="Signup password">
                 <input
-                  className={inputClass}
+                  className={inputField}
+                  type="password"
+                  value={signupPassword}
+                  onChange={(event) => setSignupPassword(event.target.value)}
+                />
+              </Field>
+
+              <Field label="Bio" className="sm:col-span-2">
+                <textarea className={textareaField} value={bio} onChange={(event) => setBio(event.target.value)} />
+              </Field>
+
+              <Field label="Profile image URL" className="sm:col-span-2">
+                <input
+                  className={inputField}
                   value={profileImageUrl}
                   onChange={(event) => setProfileImageUrl(event.target.value)}
                   placeholder="https://..."
                 />
-              </label>
+              </Field>
 
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Setup notes</span>
-                <textarea className={textareaClass} value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </label>
+              <Field label="Setup notes" className="sm:col-span-2">
+                <textarea className={textareaField} value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </Field>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
               <button className={primaryButton} onClick={() => void handleRequestConnection()} type="button">
                 <UserRoundPlus className="h-4 w-4" />
                 Request connect
-              </DashboardAction>
+              </button>
               <DashboardAction onClick={() => void handleQueueSession()} tone="coral">
                 <CircleDashed className="h-4 w-4" />
                 Queue session
               </DashboardAction>
+              <DashboardAction onClick={() => void handleLaunchSignupPrefill()} tone="blue">
+                <ExternalLink className="h-4 w-4" />
+                {isLaunching ? 'Starting...' : 'Launch prefill'}
+              </DashboardAction>
             </div>
 
             {sessionError && <p className="mt-4 text-sm text-rose-300">{sessionError}</p>}
+            {launchStatus && <p className="mt-4 text-sm text-slate-200">{launchStatus}</p>}
           </div>
         </div>
       </section>
@@ -1264,105 +1299,6 @@ function AutomationView() {
               ))}
             </div>
           )}
-        </article>
-      </section>
-    </div>
-  )
-}
-
-function TutorialView() {
-  const demoProject = tutorialProjects[0]
-  const demoCampaign = tutorialCampaigns[0]
-  const demoAnalytics = tutorialAnalytics
-
-  return (
-    <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
-          eyebrow="Tutorial"
-          title="Static demo dataset for onboarding"
-          description="This is the only place the seeded sample data appears. Everything else is fed by the backend."
-        />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className={cardClass}>
-            <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/80">Sample project</p>
-            <h3 className="mt-3 font-display text-3xl tracking-tight text-white">{demoProject.name}</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-300">{demoProject.tagline}</p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <MiniFact label="Status" value={demoProject.status} />
-              <MiniFact label="Platforms" value={demoProject.platforms.join(', ')} />
-              <MiniFact label="Updated" value={demoProject.lastUpdated} />
-            </div>
-          </div>
-
-          <div className={cardClass}>
-            <p className="text-xs uppercase tracking-[0.3em] text-sky-200/80">Sample analytics</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <MetricTile label="Engagement" value={formatNumber(demoAnalytics.summary.engagement)} icon={ChartColumn} />
-              <MetricTile label="CTR" value={`${demoAnalytics.summary.ctr}%`} icon={LineChart} />
-            </div>
-            <div className="mt-5">
-              <TimelineChart points={demoAnalytics.timeline} />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Demo campaign" title={demoCampaign.name} />
-          <div className="mt-5 space-y-3">
-            <MiniFact label="Goal" value={demoCampaign.goal} />
-            <MiniFact label="Audience" value={demoCampaign.audience} />
-            <MiniFact label="Platforms" value={demoCampaign.platforms.join(', ')} />
-          </div>
-          <div className="mt-5 space-y-3">
-            {demoCampaign.days.map((day) => (
-              <div key={day.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs uppercase tracking-[0.28em] text-slate-400">Day {day.day}</span>
-                  <span className="text-xs text-slate-300">{day.scheduledTime}</span>
-                </div>
-                <p className="mt-2 font-medium text-white">{day.title}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-300">{day.content}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className={cardClass}>
-          <SectionHeading eyebrow="What this demonstrates" title="Tutorial purpose" />
-          <div className="mt-5 grid gap-3">
-            <InfoBanner
-              icon={BadgeCheck}
-              title="Clear separation"
-              description="The demo dataset is isolated here so the production views stay tied to the backend."
-            />
-            <InfoBanner
-              icon={Globe}
-              title="Backend contract"
-              description="Projects, campaigns, analytics, platform catalogs, and automation requests now come from live endpoints."
-            />
-            <InfoBanner
-              icon={Rocket}
-              title="Human approval"
-              description="Automation assistance still keeps verification and CAPTCHA with the user, exactly as intended."
-            />
-          </div>
-
-          <div className="mt-6 rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Sample platforms</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {tutorialPlatforms.map((platform) => (
-                <span
-                  key={platform.id}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
-                >
-                  {platform.name}
-                </span>
-              ))}
-            </div>
-          </div>
         </article>
       </section>
     </div>
@@ -1697,94 +1633,28 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <article className={cardClass}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Project</p>
-          <h3 className="mt-2 font-display text-2xl tracking-tight text-white">{project.name}</h3>
-        </div>
-        <StatusPill status={project.status} />
-      </div>
-
-      <p className="mt-4 text-sm leading-6 text-slate-300">{project.description || project.tagline}</p>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <MiniFact label="Audience" value={project.targetAudience || 'Not set'} />
-        <MiniFact label="Goal" value={project.goal || 'Not set'} />
-      </div>
-
-      <div className="mt-5 space-y-3">
-        <ProgressMeter value={project.progress} />
-        <div className="flex items-center justify-between gap-3 text-sm text-slate-400">
-          <span>Updated {formatDateString(project.updatedAt || project.lastUpdated)}</span>
-          <span>{project.platforms.length ? project.platforms.join(', ') : 'Backend first'}</span>
-        </div>
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-2">
-        {project.repoUrl && (
-          <a className={secondaryButton} href={project.repoUrl} rel="noreferrer" target="_blank">
-            <ExternalLink className="h-4 w-4" />
-            Repo
-          </a>
-        )}
-        {project.demoUrl && (
-          <a className={secondaryButton} href={project.demoUrl} rel="noreferrer" target="_blank">
-            <Globe className="h-4 w-4" />
-            Demo
-          </a>
-        )}
-        <button className={ghostButton} onClick={() => onEdit(project)} type="button">
-          <PencilLine className="h-4 w-4" />
-          Edit
-        </button>
-        <button className={ghostButton} onClick={() => void onDelete(project.id)} type="button">
-          <Trash2 className="h-4 w-4" />
-          Delete
-        </button>
-      </div>
-    </article>
+    <span className="inline-flex shrink-0 items-center rounded-full border-[2px] border-[#2c211b] bg-[#d9f1e5] px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-[#1f1814] shadow-[4px_4px_10px_rgba(45,33,26,0.04)]">
+      {status}
+    </span>
   )
 }
 
-function CampaignCard({ campaign }: { campaign: Campaign }) {
+function SessionCard({ session }: { session: AutomationSession }) {
   return (
-    <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Campaign</p>
-          <h3 className="mt-2 font-display text-2xl tracking-tight text-white">{campaign.name}</h3>
+          <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">{session.platform}</p>
+          <p className="mt-2 font-black text-[#1f1814]">{session.step}</p>
         </div>
-        <StatusPill status={campaign.status} />
+        <StatusBadge status={session.status} />
       </div>
-
-      <p className="mt-4 text-sm leading-6 text-slate-300">{campaign.summary || campaign.audience || campaign.goal}</p>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <MiniFact label="Goal" value={campaign.goal} />
-        <MiniFact label="Tone" value={campaign.tone || 'Confident'} />
-        <MiniFact label="Platforms" value={campaign.platforms.join(', ')} />
+      <div className="mt-4">
+        <ProgressBar value={session.progress} />
       </div>
-    </article>
-  )
-}
-
-function PlatformCard({ platform, selected }: { platform: Platform; selected?: boolean }) {
-  return (
-    <div
-      className={`rounded-2xl border p-4 transition ${
-        selected ? 'border-emerald-400/30 bg-emerald-400/10' : 'border-white/10 bg-white/5'
-      }`}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium text-white">{platform.name}</span>
-        <StatusPill status={platform.status} />
-      </div>
-      <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
-      <p className="mt-3 text-sm leading-6 text-slate-400">{platform.notes || platform.automation}</p>
-      <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-        <ShieldCheck className="h-4 w-4 text-emerald-300" />
-        {platform.phoneRequired ? 'Phone may be required' : 'Email-friendly'}
+      <div className="mt-3 grid gap-2 text-sm text-[#5f554a] sm:grid-cols-2">
+        <p>Project: {session.projectId}</p>
+        <p>Updated: {formatDate(session.updatedAt)}</p>
       </div>
     </div>
   )
@@ -1918,6 +1788,16 @@ function formatNumber(value: number) {
 function normalizeHandle(value: string) {
   const handle = value.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24)
   return handle ? `@${handle}` : ''
+}
+
+function calculateLaunchProgress(project: Project, campaigns: Campaign[], automationSessions: AutomationSession[]) {
+  const hasCampaign = campaigns.some((campaign) => campaign.projectId === project.id)
+  const hasAutomation = automationSessions.some((session) => session.projectId === project.id)
+  const baseProgress = Number.isFinite(project.progress) ? project.progress : 0
+  const statusProgress = project.status === 'Launched' ? 100 : project.status === 'Active' ? 45 : project.status === 'Paused' ? 35 : 15
+  const milestoneProgress = (hasCampaign ? 25 : 0) + (hasAutomation ? 25 : 0)
+
+  return Math.min(100, Math.max(baseProgress, statusProgress + milestoneProgress))
 }
 
 function formatDate(value?: string) {

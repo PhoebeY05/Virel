@@ -7,6 +7,9 @@ export type PlatformName =
   | 'Facebook'
   | 'Xiaohongshu'
   | 'Telegram'
+  | 'Product Hunt'
+  | 'Hacker News'
+  | 'Discord'
 
 export type ProjectStatus = 'Planning' | 'Active' | 'Paused' | 'Launched'
 export type PlatformStatus = 'Connected' | 'Pending' | 'Needs verification' | 'Error'

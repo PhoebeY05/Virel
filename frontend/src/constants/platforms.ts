@@ -9,4 +9,7 @@ export const platformNames: PlatformName[] = [
   'Facebook',
   'Xiaohongshu',
   'Telegram',
+  'Product Hunt',
+  'Hacker News',
+  'Discord',
 ]
