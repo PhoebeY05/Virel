@@ -27,13 +27,13 @@ def create_project(client: TestClient) -> dict:
     response = client.post(
         "/projects",
         json={
-            "name": "StudySnapAI",
-            "description": "AI-powered notes and study companion.",
-            "target_audience": "university students",
-            "goal": "drive signups",
+            "name": "Virel",
+            "description": "A launch operations workspace for student projects.",
+            "target_audience": "student founders",
+            "goal": "drive project launches",
             "status": "draft",
-            "repo_url": "https://github.com/example/studysnap",
-            "demo_url": "https://studysnap.example.com",
+            "repo_url": "https://github.com/example/virel",
+            "demo_url": "https://virel.example.com",
             "logo_url": "https://cdn.example.com/logo.png",
         },
     )
@@ -75,7 +75,7 @@ def test_project_crud(client: TestClient) -> None:
 
     response = client.get(f"/projects/{project_id}")
     assert response.status_code == 200
-    assert response.json()["name"] == "StudySnapAI"
+    assert response.json()["name"] == "Virel"
 
     response = client.delete(f"/projects/{project_id}")
     assert response.status_code == 204
@@ -153,7 +153,7 @@ def test_automation_connect_endpoint(client: TestClient) -> None:
             "project_id": project["id"],
             "platform": "instagram",
             "payload": {
-                "username": "studysnapai",
+                "username": "virelai",
                 "bio": "Launching soon",
             },
         },
@@ -163,7 +163,7 @@ def test_automation_connect_endpoint(client: TestClient) -> None:
     assert body["project_id"] == project["id"]
     assert body["platform"] == "instagram"
     assert body["step"] == "connect_requested"
-    assert body["payload"]["username"] == "studysnapai"
+    assert body["payload"]["username"] == "virelai"
 
 
 def test_prompt_validation() -> None:

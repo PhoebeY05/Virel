@@ -40,11 +40,13 @@ from app.schemas import (
     PlatformAccountCreate,
     PlatformAccountRead,
     PlatformAccountUpdate,
+    PlatformStatsRead,
     PostUpdate,
     ProjectCreate,
     ProjectRead,
     ProjectUpdate,
     ReplySuggestionRead,
+    TopPostStatsRead,
 )
 
 
@@ -403,6 +405,17 @@ def get_automation_session(session: Session, session_id: str, user_id: str) -> A
     return automation
 
 
+def list_automation_sessions(session: Session, user_id: str) -> list[AutomationSession]:
+    return list(
+        session.scalars(
+            select(AutomationSession)
+            .join(AutomationSession.project)
+            .where(Project.user_id == user_id)
+            .order_by(AutomationSession.created_at.desc())
+        )
+    )
+
+
 def list_comments_for_post(session: Session, post_id: str, user_id: str) -> list[Comment]:
     ensure_post(session, post_id, user_id)
     return list(session.scalars(select(Comment).where(Comment.post_id == post_id).order_by(Comment.created_at.asc())))
@@ -467,93 +480,61 @@ def _empty_analytics(project_id: str | None = None, campaign_id: str | None = No
     )
 
 
-def _point_from_mapping(item: dict[str, object], fallback_date: datetime) -> AnalyticsPoint:
-    raw_date = item.get("date") or item.get("snapshot_date") or fallback_date
-    if isinstance(raw_date, datetime):
-        date = raw_date
-    else:
-        date = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
-    return AnalyticsPoint(
-        date=date,
-        likes=int(item.get("likes") or 0),
-        comments=int(item.get("comments") or 0),
-        shares=int(item.get("shares") or 0),
-        ctr=float(item.get("ctr") or 0.0),
-        clicks=int(item.get("clicks") or 0),
-    )
+def _mock_platform_metrics(seed: int, scale: int = 1) -> dict[str, int | float]:
+    likes = 30 + seed % 170 + scale * 3
+    comments = 4 + (seed // 7) % 35
+    shares = 2 + (seed // 11) % 20
+    clicks = 12 + (seed // 13) % 120
+    ctr = round(min(0.2, 0.015 + (seed % 25) / 2000), 4)
+    return {"likes": likes, "comments": comments, "shares": shares, "clicks": clicks, "ctr": ctr}
 
 
-def _points_for_snapshot(snapshot: AnalyticsSnapshot) -> list[AnalyticsPoint]:
-    if snapshot.timeline:
-        return [_point_from_mapping(item, snapshot.snapshot_date) for item in snapshot.timeline]
-    return [
-        AnalyticsPoint(
-            date=snapshot.snapshot_date,
-            likes=snapshot.likes,
-            comments=snapshot.comments,
-            shares=snapshot.shares,
-            ctr=snapshot.ctr,
-            clicks=snapshot.clicks,
+def _timeline_for_seed(seed: int) -> list[AnalyticsPoint]:
+    points: list[AnalyticsPoint] = []
+    base = datetime.now(timezone.utc)
+    for offset in range(7):
+        daily_seed = seed + offset * 31
+        metrics = _mock_platform_metrics(daily_seed)
+        points.append(
+            AnalyticsPoint(
+                date=base.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=offset),
+                likes=int(metrics["likes"]),
+                comments=int(metrics["comments"]),
+                shares=int(metrics["shares"]),
+                ctr=float(metrics["ctr"]),
+                clicks=int(metrics["clicks"]),
+            )
         )
+    return points
+
+
+def _aggregate_platform_summary(items: list[tuple[str, int]]) -> tuple[str, list[AnalyticsPoint], dict[str, dict[str, int | float]]]:
+    if not items:
+        return "n/a", [], {}
+    platform_metrics: dict[str, dict[str, int | float]] = {}
+    for platform, seed in items:
+        platform_metrics[platform] = _mock_platform_metrics(seed)
+    best_platform = max(platform_metrics.items(), key=lambda pair: pair[1]["likes"] + pair[1]["clicks"])[0]
+    timeline_seed = sum(seed for _, seed in items) or 1
+    return best_platform, _timeline_for_seed(timeline_seed), platform_metrics
+
+
+def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
+    campaign = ensure_campaign(session, campaign_id, user_id)
+    platform_items = [
+        (post.platform, _score_seed(campaign.id, post.id, post.platform))
+        for day in campaign.days
+        for post in day.posts
     ]
-
-
-def _aggregate_snapshots(
-    snapshots: list[AnalyticsSnapshot],
-    project_id: str | None = None,
-    campaign_id: str | None = None,
-) -> AnalyticsDetail:
-    if not snapshots:
-        return _empty_analytics(project_id=project_id, campaign_id=campaign_id)
-
-    platform_totals: dict[str, dict[str, int | float]] = defaultdict(
-        lambda: {"likes": 0, "comments": 0, "shares": 0, "clicks": 0, "ctr_values": []}
-    )
-    timeline_totals: dict[datetime, dict[str, int | list[float]]] = defaultdict(
-        lambda: {"likes": 0, "comments": 0, "shares": 0, "clicks": 0, "ctr_values": []}
-    )
-
-    for snapshot in snapshots:
-        platform_metrics = platform_totals[snapshot.platform]
-        platform_metrics["likes"] = int(platform_metrics["likes"]) + snapshot.likes
-        platform_metrics["comments"] = int(platform_metrics["comments"]) + snapshot.comments
-        platform_metrics["shares"] = int(platform_metrics["shares"]) + snapshot.shares
-        platform_metrics["clicks"] = int(platform_metrics["clicks"]) + snapshot.clicks
-        platform_metrics["ctr_values"].append(snapshot.ctr)  # type: ignore[union-attr]
-
-        for point in _points_for_snapshot(snapshot):
-            date_key = point.date.replace(hour=0, minute=0, second=0, microsecond=0)
-            day = timeline_totals[date_key]
-            day["likes"] = int(day["likes"]) + point.likes
-            day["comments"] = int(day["comments"]) + point.comments
-            day["shares"] = int(day["shares"]) + point.shares
-            day["clicks"] = int(day["clicks"]) + point.clicks
-            day["ctr_values"].append(point.ctr)  # type: ignore[union-attr]
-
-    likes = sum(snapshot.likes for snapshot in snapshots)
-    comments = sum(snapshot.comments for snapshot in snapshots)
-    shares = sum(snapshot.shares for snapshot in snapshots)
-    clicks = sum(snapshot.clicks for snapshot in snapshots)
-    ctr = round(mean([snapshot.ctr for snapshot in snapshots]), 4)
-    best_platform = max(
-        platform_totals.items(),
-        key=lambda item: int(item[1]["likes"]) + int(item[1]["clicks"]),
-    )[0]
-    timeline = [
-        AnalyticsPoint(
-            date=date,
-            likes=int(values["likes"]),
-            comments=int(values["comments"]),
-            shares=int(values["shares"]),
-            clicks=int(values["clicks"]),
-            ctr=round(mean(values["ctr_values"]), 4) if values["ctr_values"] else 0.0,  # type: ignore[arg-type]
-        )
-        for date, values in sorted(timeline_totals.items())
-    ]
-
+    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
+    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
+    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
+    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
+    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
+    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
     return AnalyticsDetail(
-        project_id=project_id,
-        campaign_id=campaign_id,
+        project_id=campaign.project_id,
+        campaign_id=campaign.id,
         likes=likes,
         comments=comments,
         shares=shares,
@@ -580,24 +561,65 @@ def summarize_project(session: Session, project_id: str, user_id: str) -> Analyt
     project = ensure_owned_project(session, project_id, user_id)
     snapshots = list(
         session.scalars(
-            select(AnalyticsSnapshot)
-            .where(AnalyticsSnapshot.project_id == project.id)
-            .order_by(AnalyticsSnapshot.snapshot_date.asc())
+            select(Campaign)
+            .where(Campaign.project_id == project.id)
+            .options(selectinload(Campaign.days).selectinload(CampaignDay.posts))
         )
     )
-    return _aggregate_snapshots(snapshots, project_id=project.id)
+    platform_items = []
+    for campaign in campaigns:
+        for day in campaign.days:
+            for post in day.posts:
+                platform_items.append((post.platform, _score_seed(project.id, campaign.id, post.id, post.platform)))
+    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
+    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
+    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
+    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
+    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
+    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
+    return AnalyticsDetail(
+        project_id=project.id,
+        campaign_id=None,
+        likes=likes,
+        comments=comments,
+        shares=shares,
+        ctr=ctr,
+        clicks=clicks,
+        best_platform=best_platform,
+        engagement_timeline=timeline,
+    )
 
 
 def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
-    snapshots = list(
+    campaigns = list(
         session.scalars(
             select(AnalyticsSnapshot)
             .join(AnalyticsSnapshot.project)
             .where(Project.user_id == user_id)
-            .order_by(AnalyticsSnapshot.snapshot_date.asc())
         )
     )
-    return _aggregate_snapshots(snapshots)
+    platform_items = []
+    for campaign in campaigns:
+        for day in campaign.days:
+            for post in day.posts:
+                platform_items.append((post.platform, _score_seed(campaign.id, post.id, post.platform)))
+    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
+    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
+    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
+    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
+    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
+    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
+    return AnalyticsDetail(
+        project_id=None,
+        campaign_id=None,
+        likes=likes,
+        comments=comments,
+        shares=shares,
+        ctr=ctr,
+        clicks=clicks,
+        best_platform=best_platform,
+        engagement_timeline=timeline,
+    )
 
 
 def list_supported_platforms() -> list[dict[str, object]]:

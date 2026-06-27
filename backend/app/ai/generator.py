@@ -149,7 +149,11 @@ def generate_campaign_plan(
             )
             raw_text = getattr(response, "output_text", "") or ""
             payload_text = _strip_json_block(raw_text)
-            return CampaignPlan.model_validate(json.loads(payload_text))
+            plan = CampaignPlan.model_validate(json.loads(payload_text))
+            if len(plan.days) != 7:
+                return _fallback_campaign_plan(project_name, description, audience, goal, platforms, tone)
+            validate_plan(plan)
+            return plan
         except Exception:
             pass
     return _fallback_campaign_plan(project_name, description, audience, goal, platforms, tone)
@@ -212,4 +216,3 @@ def validate_plan(plan: CampaignPlan) -> CampaignPlan:
 def fallback_reply_text(platform: str, tone: str) -> str:
     plan = generate_reply("", "", "", tone, platform, openai_api_key=None)
     return plan.reply_text
-

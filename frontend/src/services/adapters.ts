@@ -62,6 +62,11 @@ export interface ApiGeneratedPost {
   status?: string
   created_at?: string
   updated_at?: string
+  likes?: number
+  comments?: number
+  shares?: number
+  clicks?: number
+  ctr?: number
 }
 
 export interface ApiAnalytics {
@@ -70,7 +75,10 @@ export interface ApiAnalytics {
   shares: number
   clicks: number
   ctr: number
+  engagement: number
   best_platform: string
+  active_campaigns: number
+  total_projects: number
   engagement_timeline: {
     date: string
     likes: number
@@ -78,6 +86,28 @@ export interface ApiAnalytics {
     shares: number
     clicks: number
     ctr: number
+  }[]
+  platforms: {
+    platform: string
+    likes: number
+    comments: number
+    shares: number
+    clicks: number
+    ctr: number
+    engagement: number
+    posts: number
+  }[]
+  top_posts: {
+    id: string
+    platform: string
+    title: string
+    likes: number
+    comments: number
+    shares: number
+    clicks: number
+    ctr: number
+    engagement: number
+    scheduled_at?: string | null
   }[]
 }
 
@@ -206,6 +236,11 @@ export function fromApiDay(day: ApiCampaignDay, posts: ApiGeneratedPost[]): Camp
 }
 
 export function fromApiPost(post: ApiGeneratedPost): GeneratedPost & { scheduledTime?: string } {
+  const likes = post.likes ?? 0
+  const comments = post.comments ?? 0
+  const shares = post.shares ?? 0
+  const clicks = post.clicks ?? 0
+  const ctr = post.ctr ?? 0
   return {
     id: post.id,
     platform: toPlatformName(post.platform),
@@ -215,6 +250,12 @@ export function fromApiPost(post: ApiGeneratedPost): GeneratedPost & { scheduled
     title: post.title,
     content: post.content,
     status: fromApiPostStatus(post.status),
+    engagementEstimate: Math.round(likes + comments + shares + clicks),
+    likes,
+    comments,
+    shares,
+    clicks,
+    ctr: toPercent(ctr),
     hashtags: post.hashtags ?? [],
     callToAction: post.call_to_action ?? '',
     scheduledAt: post.scheduled_at,
@@ -222,10 +263,7 @@ export function fromApiPost(post: ApiGeneratedPost): GeneratedPost & { scheduled
   }
 }
 
-export function fromApiAnalytics(
-  analytics: ApiAnalytics,
-  counts: { activeCampaigns: number; totalProjects: number },
-): Analytics {
+export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
   const timeline = analytics.engagement_timeline.map((point) => ({
     label: formatDay(point.date),
     engagement: point.likes + point.comments + point.shares + point.clicks,
@@ -234,24 +272,39 @@ export function fromApiAnalytics(
     shares: point.shares,
     ctr: toPercent(point.ctr),
   }))
-  const engagement = analytics.likes + analytics.comments + analytics.shares + analytics.clicks
+  const platforms = analytics.platforms.map((platform) => ({
+    platform: toPlatformName(platform.platform),
+    likes: platform.likes,
+    comments: platform.comments,
+    shares: platform.shares,
+    clicks: platform.clicks,
+    ctr: toPercent(platform.ctr),
+    engagement: platform.engagement,
+    posts: platform.posts,
+  }))
+  const topPosts = analytics.top_posts.map((post) => ({
+    id: post.id,
+    platform: toPlatformName(post.platform),
+    title: post.title,
+    likes: post.likes,
+    comments: post.comments,
+    shares: post.shares,
+    clicks: post.clicks,
+    ctr: toPercent(post.ctr),
+    engagement: post.engagement,
+    scheduledAt: post.scheduled_at,
+  }))
 
   return {
     summary: {
-      activeCampaigns: counts.activeCampaigns,
-      totalProjects: counts.totalProjects,
-      engagement,
+      activeCampaigns: analytics.active_campaigns,
+      totalProjects: analytics.total_projects,
+      engagement: analytics.engagement,
       ctr: toPercent(analytics.ctr),
     },
     timeline,
-    platforms: [
-      {
-        platform: toPlatformName(analytics.best_platform),
-        engagement,
-        growth: Math.round(toPercent(analytics.ctr)),
-      },
-    ],
-    topPosts: [],
+    platforms,
+    topPosts,
   }
 }
 
@@ -333,3 +386,9 @@ function toPercent(value: number) {
   return value <= 1 ? Number((value * 100).toFixed(1)) : value
 }
 
+function defaultUsername(platform: PlatformName) {
+  if (platform === 'Reddit') return 'u/VirelHQ'
+  if (platform === 'Discord') return 'Virel Community'
+  if (platform === 'LinkedIn') return 'Virel'
+  return '@virel'
+}

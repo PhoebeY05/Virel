@@ -13,7 +13,7 @@ FastAPI backend for the Virel launch infrastructure MVP.
 - Comment reply suggestion endpoints
 - Optional Clerk JWT authentication
 - Router modules under `app/api/routes/`
-- API examples and a tutorial-driven demo dataset walkthrough
+- API examples for the live backend contract
 
 ## Environment
 
@@ -47,6 +47,4 @@ pytest
 
 ## Docs
 
-- Tutorial: [backend/docs/tutorial.md](./docs/tutorial.md)
 - API examples: [backend/docs/api-examples.md](./docs/api-examples.md)
-

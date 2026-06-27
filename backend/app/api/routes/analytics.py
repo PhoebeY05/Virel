@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_request_db
 from app.auth import CurrentUser, get_current_user
-from app.schemas import AnalyticsDetail
-from app.services import ensure_user, summarize_all, summarize_campaign, summarize_project
+from app.schemas import AnalyticsDetail, PlatformStatsRead
+from app.services import ensure_user, list_platform_stats, summarize_all, summarize_campaign, summarize_project
 
 router = APIRouter(tags=["analytics"])
 
@@ -48,3 +48,11 @@ def get_campaign_analytics(
     user = ensure_user(db, current_user)
     return summarize_campaign(db, campaign_id, user.id)
 
+
+@router.get("/analytics/platforms", response_model=list[PlatformStatsRead])
+def get_platform_analytics(
+    db: Session = Depends(get_request_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[PlatformStatsRead]:
+    user = ensure_user(db, current_user)
+    return list_platform_stats(db, user.id)

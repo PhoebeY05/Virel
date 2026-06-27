@@ -237,19 +237,55 @@ class AnalyticsPoint(APIModel):
     clicks: int
 
 
+class PlatformStatsRead(APIModel):
+    platform: str
+    likes: int
+    comments: int
+    shares: int
+    clicks: int
+    ctr: float
+    engagement: int
+    posts: int
+
+
+class TopPostStatsRead(APIModel):
+    id: str
+    platform: str
+    title: str
+    likes: int
+    comments: int
+    shares: int
+    clicks: int
+    ctr: float
+    engagement: int
+    scheduled_at: datetime | None = None
+
+
 class AnalyticsSummary(APIModel):
     likes: int
     comments: int
     shares: int
     ctr: float
     clicks: int
+    engagement: int
     best_platform: str
     engagement_timeline: list[AnalyticsPoint]
+    active_campaigns: int
+    total_projects: int
 
 
 class AnalyticsDetail(AnalyticsSummary):
     project_id: str | None = None
     campaign_id: str | None = None
+    platforms: list[PlatformStatsRead] = Field(default_factory=list)
+    top_posts: list[TopPostStatsRead] = Field(default_factory=list)
+
+
+class MediaUploadRead(APIModel):
+    url: str
+    filename: str
+    content_type: str
+    size: int
 
 
 class CommentBase(BaseModel):
