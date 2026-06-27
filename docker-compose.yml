@@ -18,8 +18,8 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,7 +30,6 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
       AUTH_ENABLED: "false"
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
-      VIREL_AUTOMATION_DIR: /app/automation
     ports:
       - "8000:8000"
     command: ["sh", "-c", "uvicorn app.main:build_app --factory --host 0.0.0.0 --port ${PORT:-8000}"]

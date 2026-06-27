@@ -2,13 +2,12 @@ services:
   - type: web
     name: virel-backend
     runtime: docker
-    dockerfilePath: backend/Dockerfile
-    dockerContext: .
+    rootDir: backend
+    dockerfilePath: Dockerfile
     healthCheckPath: /health
     buildFilter:
       paths:
         - backend/**
-        - automation/**
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -22,8 +21,6 @@ services:
         value: "false"
       - key: CLERK_JWKS_URL
         sync: false
-      - key: VIREL_AUTOMATION_DIR
-        value: /app/automation
 
   - type: web
     name: virel-frontend

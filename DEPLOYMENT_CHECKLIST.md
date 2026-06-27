@@ -17,9 +17,10 @@ DATABASE_URL=postgresql://postgres:<SUPABASE_PASSWORD>@db.<SUPABASE_PROJECT_REF>
 
 - Service type: `Web Service`
 - Runtime: `Docker`
-- Dockerfile path: `backend/Dockerfile`
+- Root directory: `backend`
+- Dockerfile path: `Dockerfile`
 - Health check path: `/health`
-- Root/build context: repo root
+- Root/build context: `backend`
 
 Backend env vars:
 
@@ -28,7 +29,6 @@ DATABASE_URL=postgresql://postgres:<SUPABASE_PASSWORD>@db.<SUPABASE_PROJECT_REF>
 FRONTEND_URL=https://virel-frontend.onrender.com
 CORS_ORIGINS=https://virel-frontend.onrender.com
 AUTH_ENABLED=false
-VIREL_AUTOMATION_DIR=/app/automation
 ```
 
 Optional backend env vars:
@@ -42,6 +42,7 @@ Backend build/start behavior:
 
 - The container listens on Render’s `PORT` automatically.
 - Uvicorn runs `app.main:build_app` with `--factory`.
+- The backend image does not bundle the automation workspace on Render.
 
 ## 3) Render frontend service
 
@@ -67,4 +68,3 @@ VITE_API_URL=https://virel-backend.onrender.com
 - Open `https://virel-backend.onrender.com/health`
 - Confirm the frontend loads and API calls go to `https://virel-backend.onrender.com`
 - If browser requests fail, confirm `CORS_ORIGINS` includes the frontend URL exactly
-

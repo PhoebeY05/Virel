@@ -130,13 +130,6 @@ const secondaryButton = `${buttonBase} border border-white/10 bg-white/5 text-sl
 const ghostButton = `${buttonBase} border border-transparent bg-transparent text-slate-300 hover:bg-white/5 hover:text-white`
 const cardClass = 'rounded-[28px] border border-white/10 bg-slate-950/75 p-6 shadow-[0_18px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl'
 
-const automationGuidance: Partial<Record<PlatformName, string>> = {
-  LinkedIn: 'LinkedIn account setup is guidance-only because identity and verification checks are strongly enforced.',
-  Xiaohongshu: 'Xiaohongshu generally requires phone-based regional verification, so Virel keeps this as guided setup.',
-}
-
-const unsupportedSignupPlatforms: PlatformName[] = ['LinkedIn', 'Xiaohongshu']
-
 function App() {
   const [view, setView] = useState<View>('Dashboard')
 
@@ -1655,7 +1648,6 @@ function AutomationView() {
             account={activeAccount}
             platform={modalPlatform}
             project={currentProject}
-            settings={settings}
             onPrepareAccount={() => void handlePrepareAccount(modalPlatform.name)}
             onResumeSession={() => void handleResumeAccount(modalPlatform.name)}
           />
@@ -1749,14 +1741,12 @@ function PhoneSimulator({
   account,
   platform,
   project,
-  settings,
   onPrepareAccount,
   onResumeSession,
 }: {
   account: PlatformAccount | null
   platform: Platform
   project: Project | null
-  settings: UserSettings | null
   onPrepareAccount: () => void
   onResumeSession: () => void
 }) {
@@ -2366,27 +2356,6 @@ function statusTone(status: string) {
     return 'bg-[#fde2cf] text-[#1f1814]'
   }
   return 'bg-white text-[#1f1814]'
-}
-
-function SessionCard({ session }: { session: AutomationSession }) {
-  return (
-    <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">{session.platform}</p>
-          <p className="mt-2 font-black text-[#1f1814]">{session.step}</p>
-        </div>
-        <StatusBadge status={session.status} />
-      </div>
-      <div className="mt-4">
-        <ProgressBar value={session.progress} />
-      </div>
-      <div className="mt-3 grid gap-2 text-sm text-[#5f554a] sm:grid-cols-2">
-        <p>Project: {session.projectId}</p>
-        <p>Updated: {formatDate(session.updatedAt)}</p>
-      </div>
-    </div>
-  )
 }
 
 function LoadingGrid() {

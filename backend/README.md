@@ -69,7 +69,7 @@ The repository includes an Alembic scaffold under `backend/alembic/`.
 1. Create a Supabase database and copy the connection string.
 1. Set `DATABASE_URL` to the Supabase string. If Supabase gives you a `postgresql://...` URL, this app will normalize it to the `psycopg` driver automatically.
 1. Add `?sslmode=require` to the Supabase connection string if it is not already present.
-1. Deploy the backend on Render using the `backend/Dockerfile`.
+1. Deploy the backend on Render from the `backend/` directory using its `Dockerfile`.
 1. Use these Render values for the default blueprint names in `render.yaml`:
 
 ```env
@@ -80,6 +80,7 @@ VITE_API_URL=https://virel-backend.onrender.com
 ```
 
 1. Keep `OPENAI_API_KEY` and `CLERK_JWKS_URL` synced only if you are using those features.
+1. The Render backend image does not bundle the local automation workspace, so automation assistant endpoints remain a local/dev concern.
 
 ## Tests
 
