@@ -22,6 +22,14 @@ export interface Project {
   platforms: PlatformName[]
   progress: number
   lastUpdated: string
+  description?: string
+  targetAudience?: string
+  goal?: string
+  repoUrl?: string | null
+  demoUrl?: string | null
+  logoUrl?: string | null
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface CampaignDay {
@@ -42,6 +50,11 @@ export interface GeneratedPost {
   content: string
   status: PostStatus
   engagementEstimate: number
+  campaignId?: string
+  campaignDayId?: string
+  hashtags?: string[]
+  callToAction?: string
+  scheduledAt?: string | null
 }
 
 export interface Campaign {
@@ -54,6 +67,10 @@ export interface Campaign {
   status: CampaignStatus
   days: CampaignDay[]
   posts: GeneratedPost[]
+  summary?: string
+  tone?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface AnalyticsPoint {
@@ -98,6 +115,19 @@ export interface Platform {
   username: string
   phoneRequired: boolean
   automation: 'Assisted setup' | 'Guidance only' | 'Ready'
+  notes?: string
+}
+
+export interface AutomationSession {
+  id: string
+  projectId: string
+  platform: PlatformName
+  status: string
+  step: string
+  progress: number
+  payload: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
 }
 
 export interface Comment {

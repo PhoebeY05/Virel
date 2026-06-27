@@ -1,44 +1,82 @@
-import { platforms as seedPlatforms } from '../mocks/data'
-import type { Platform } from '../types'
-import { fromApiPlatform, type ApiSupportedPlatform } from './adapters'
+import type { AutomationSession, Platform, PlatformName } from '../types'
+import {
+  fromApiAutomationSession,
+  fromApiPlatform,
+  type ApiAutomationSession,
+  type ApiSupportedPlatform,
+} from './adapters'
 import { apiRequest } from './api'
 
-let platforms = [...seedPlatforms]
-const wait = (ms = 350) => new Promise((resolve) => window.setTimeout(resolve, ms))
+export interface AutomationConnectInput {
+  projectId: string
+  platform: PlatformName
+  payload: Record<string, unknown>
+  status?: string
+  step?: string
+  progress?: number
+}
+
+export interface AutomationSessionCreateInput {
+  projectId: string
+  platform: PlatformName
+  status?: string
+  step?: string
+  progress?: number
+  payload?: Record<string, unknown>
+}
 
 export async function getPlatforms(): Promise<Platform[]> {
-  try {
-    const response = await apiRequest<ApiSupportedPlatform[]>('/platforms')
-    const supported = response
-      .map(fromApiPlatform)
-      .filter((platform): platform is Platform => platform !== null)
-    if (supported.length) {
-      platforms = supported
-      return [...platforms]
-    }
-    return [...platforms]
-  } catch {
-    await wait()
-    return [...platforms]
-  }
+  const response = await apiRequest<ApiSupportedPlatform[]>('/platforms')
+  return response.map(fromApiPlatform).filter((platform): platform is Platform => platform !== null)
 }
 
-export async function connectPlatform(id: string): Promise<Platform> {
-  await wait()
-  platforms = platforms.map((platform) =>
-    platform.id === id ? { ...platform, status: 'Pending' } : platform,
-  )
-  const updated = platforms.find((platform) => platform.id === id)
-  if (!updated) throw new Error('Platform not found')
-  return updated
+export async function connectAutomation(input: AutomationConnectInput): Promise<AutomationSession> {
+  const response = await apiRequest<ApiAutomationSession>('/automation/connect', {
+    method: 'POST',
+    body: JSON.stringify({
+      project_id: input.projectId,
+      platform: input.platform.toLowerCase().replaceAll(' ', '_'),
+      payload: input.payload,
+      status: input.status ?? 'queued',
+      step: input.step ?? 'connect_requested',
+      progress: input.progress ?? 0,
+    }),
+  })
+  return fromApiAutomationSession(response)
 }
 
-export async function disconnectPlatform(id: string): Promise<Platform> {
-  await wait()
-  platforms = platforms.map((platform) =>
-    platform.id === id ? { ...platform, status: 'Needs verification' } : platform,
-  )
-  const updated = platforms.find((platform) => platform.id === id)
-  if (!updated) throw new Error('Platform not found')
-  return updated
+export async function createAutomationSession(input: AutomationSessionCreateInput): Promise<AutomationSession> {
+  const response = await apiRequest<ApiAutomationSession>('/automation/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      project_id: input.projectId,
+      platform: input.platform.toLowerCase().replaceAll(' ', '_'),
+      status: input.status ?? 'queued',
+      step: input.step ?? 'created',
+      progress: input.progress ?? 0,
+      payload: input.payload ?? {},
+    }),
+  })
+  return fromApiAutomationSession(response)
+}
+
+export async function updateAutomationSession(
+  sessionId: string,
+  patch: Partial<AutomationSession>,
+): Promise<AutomationSession> {
+  const response = await apiRequest<ApiAutomationSession>(`/automation/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: patch.status,
+      step: patch.step,
+      progress: patch.progress,
+      payload: patch.payload,
+    }),
+  })
+  return fromApiAutomationSession(response)
+}
+
+export async function getAutomationSession(sessionId: string): Promise<AutomationSession> {
+  const response = await apiRequest<ApiAutomationSession>(`/automation/sessions/${sessionId}`)
+  return fromApiAutomationSession(response)
 }

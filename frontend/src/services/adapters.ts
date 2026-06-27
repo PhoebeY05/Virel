@@ -9,6 +9,7 @@ import type {
   PostStatus,
   Project,
   ProjectStatus,
+  AutomationSession,
 } from '../types'
 
 export interface ApiProject {
@@ -18,6 +19,10 @@ export interface ApiProject {
   target_audience?: string
   goal?: string
   status?: string
+  repo_url?: string | null
+  demo_url?: string | null
+  logo_url?: string | null
+  created_at?: string
   updated_at?: string
 }
 
@@ -30,6 +35,8 @@ export interface ApiCampaign {
   tone?: string
   platforms?: string[]
   status?: string
+  created_at?: string
+  updated_at?: string
   days?: ApiCampaignDay[]
   posts?: ApiGeneratedPost[]
 }
@@ -49,8 +56,12 @@ export interface ApiGeneratedPost {
   day_number: number
   title: string
   content: string
+  hashtags?: string[]
+  call_to_action?: string
   scheduled_at?: string | null
   status?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface ApiAnalytics {
@@ -73,9 +84,23 @@ export interface ApiAnalytics {
 export interface ApiSupportedPlatform {
   name: string
   slug: string
+  writing_style: string
   requires_human_verification: boolean
   phone_required: string
   automation_level: string
+  notes: string
+}
+
+export interface ApiAutomationSession {
+  id: string
+  project_id: string
+  platform: string
+  status: string
+  step: string
+  progress: number
+  payload: Record<string, unknown>
+  created_at: string
+  updated_at: string
 }
 
 const slugToName: Record<string, PlatformName> = {
@@ -102,13 +127,24 @@ export function toPlatformName(platform: string): PlatformName {
   return slugToName[platform] ?? (platform as PlatformName)
 }
 
-export function toApiProject(input: Omit<Project, 'id' | 'lastUpdated' | 'progress'> | Partial<Project>) {
+type ProjectPayload = Partial<Project> & {
+  description?: string
+  targetAudience?: string
+  repoUrl?: string | null
+  demoUrl?: string | null
+  logoUrl?: string | null
+}
+
+export function toApiProject(input: ProjectPayload) {
   return {
-    name: input.name,
-    description: input.tagline,
-    target_audience: input.platforms?.join(', ') ?? '',
-    goal: '',
+    name: input.name ?? '',
+    description: input.description ?? input.tagline ?? '',
+    target_audience: input.targetAudience ?? input.platforms?.join(', ') ?? '',
+    goal: input.goal ?? '',
     status: toApiProjectStatus(input.status),
+    repo_url: input.repoUrl ?? undefined,
+    demo_url: input.demoUrl ?? undefined,
+    logo_url: input.logoUrl ?? undefined,
   }
 }
 
@@ -119,8 +155,16 @@ export function fromApiProject(project: ApiProject): Project {
     tagline: project.description || project.goal || 'Launch-ready student project.',
     status: fromApiProjectStatus(project.status),
     platforms: [],
-    progress: project.status === 'launched' ? 94 : project.status === 'active' ? 72 : 38,
-    lastUpdated: formatDate(project.updated_at),
+    progress: project.status?.toLowerCase() === 'launched' ? 94 : project.status?.toLowerCase() === 'active' ? 72 : 38,
+    lastUpdated: formatDate(project.updated_at ?? project.created_at),
+    description: project.description,
+    targetAudience: project.target_audience,
+    goal: project.goal,
+    repoUrl: project.repo_url ?? null,
+    demoUrl: project.demo_url ?? null,
+    logoUrl: project.logo_url ?? null,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
   }
 }
 
@@ -139,6 +183,10 @@ export function fromApiCampaign(campaign: ApiCampaign): Campaign {
     status: fromApiCampaignStatus(campaign.status),
     days,
     posts,
+    summary: campaign.summary,
+    tone: campaign.tone,
+    createdAt: campaign.created_at,
+    updatedAt: campaign.updated_at,
   }
 }
 
@@ -161,10 +209,15 @@ export function fromApiPost(post: ApiGeneratedPost): GeneratedPost & { scheduled
     id: post.id,
     platform: toPlatformName(post.platform),
     projectId: post.campaign_id,
+    campaignId: post.campaign_id,
+    campaignDayId: post.campaign_day_id,
     title: post.title,
     content: post.content,
     status: fromApiPostStatus(post.status),
     engagementEstimate: 68,
+    hashtags: post.hashtags ?? [],
+    callToAction: post.call_to_action ?? '',
+    scheduledAt: post.scheduled_at,
     scheduledTime: formatTime(post.scheduled_at),
   }
 }
@@ -213,6 +266,21 @@ export function fromApiPlatform(platform: ApiSupportedPlatform): Platform | null
     username: defaultUsername(name),
     phoneRequired: platform.phone_required === 'required' || platform.phone_required === 'often',
     automation: fromApiAutomationLevel(platform.automation_level),
+    notes: platform.notes,
+  }
+}
+
+export function fromApiAutomationSession(session: ApiAutomationSession): AutomationSession {
+  return {
+    id: session.id,
+    projectId: session.project_id,
+    platform: toPlatformName(session.platform),
+    status: session.status,
+    step: session.step,
+    progress: session.progress,
+    payload: session.payload,
+    createdAt: session.created_at,
+    updatedAt: session.updated_at,
   }
 }
 
