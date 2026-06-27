@@ -42,6 +42,7 @@ export interface CampaignDay {
   content: string
   scheduledTime: string
   status: PostStatus
+  posts?: GeneratedPost[]
 }
 
 export interface GeneratedPost {
@@ -62,6 +63,7 @@ export interface GeneratedPost {
   hashtags?: string[]
   callToAction?: string
   scheduledAt?: string | null
+  scheduledTime?: string
 }
 
 export interface Campaign {
@@ -146,6 +148,7 @@ export interface PlatformAccount {
   status: PlatformAccountStatus
   notes: string
   phoneRequired: boolean
+  sessionPath?: string | null
   createdAt: string
   updatedAt: string
 }

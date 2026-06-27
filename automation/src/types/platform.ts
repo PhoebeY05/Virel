@@ -7,11 +7,14 @@ export const PlatformNameSchema = z.enum([
   "reddit",
   "linkedin",
   "tiktok",
+  "telegram",
   "xiaohongshu",
   "producthunt"
 ]);
 
 export type PlatformName = z.infer<typeof PlatformNameSchema>;
+
+export type BrowserChannel = "chromium" | "firefox" | "webkit";
 
 export const AccountSetupSchema = z.object({
   projectId: z.string(),
@@ -55,6 +58,6 @@ export interface PlatformAdapter {
   fillProfile(): Promise<void>;
   publishPost(post: Post): Promise<void>;
   logout(): Promise<void>;
-  saveSession(): Promise<void>;
+  saveSession(): Promise<string>;
   restoreSession(): Promise<boolean>;
 }

@@ -1,42 +1,41 @@
 import { BackendClient } from "../api/backendClient";
 import { BrowserManager } from "../browser/browserManager";
+import { createPlatformAdapter } from "../platforms";
 import { AccountSetup } from "../types/platform";
 import { AutomationError, UserVerificationRequiredError } from "../utils/errors";
-import { createPlatformAdapter } from "../platforms";
 
-export class AccountSetupService {
+export class SessionResumeService {
   constructor(
     private readonly backendClient = new BackendClient(),
     private readonly browserManager = new BrowserManager()
   ) {}
 
-  async setupAccount(setup: AccountSetup): Promise<void> {
+  async resumeSession(setup: AccountSetup): Promise<void> {
     const session = await this.backendClient.createAutomationSession({
       platform: setup.platform,
       accountId: setup.accountId,
       status: "running",
-      message: "Starting account setup"
+      message: "Restoring saved browser session"
     });
 
     const adapter = createPlatformAdapter(setup, this.browserManager);
 
     try {
-      await adapter.createAccount();
-      await adapter.fillProfile();
+      await adapter.login();
       const sessionPath = await adapter.saveSession();
-
-      await this.backendClient.updateAutomationSession(session.id, {
-        status: "completed",
-        message: "Account setup completed"
-      });
 
       if (setup.accountId) {
         await this.backendClient.updateAccount(setup.accountId, {
           status: "connected",
           sessionPath,
-          message: "Session saved"
+          message: "Session restored"
         });
       }
+
+      await this.backendClient.updateAutomationSession(session.id, {
+        status: "completed",
+        message: "Browser session restored"
+      });
     } catch (error) {
       const waiting = error instanceof UserVerificationRequiredError;
       await this.backendClient.updateAutomationSession(session.id, {
@@ -48,7 +47,7 @@ export class AccountSetupService {
         throw error;
       }
 
-      throw new AutomationError("Account setup failed.", "ACCOUNT_SETUP_FAILED", error);
+      throw new AutomationError("Session resume failed.", "SESSION_RESUME_FAILED", error);
     } finally {
       await this.browserManager.close();
     }

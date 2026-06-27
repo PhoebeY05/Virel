@@ -9,7 +9,7 @@ from app.platforms import platform_names
 
 
 class APIModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class UserRead(APIModel):
@@ -120,8 +120,8 @@ class CampaignPostSpec(APIModel):
     scheduled_at: datetime | None = None
 
 
-class CampaignDaySpec(APIModel):
-    day_number: int
+class CampaignPhaseSpec(APIModel):
+    phase_number: int
     theme: str
     objective: str
     posts: list[CampaignPostSpec] = Field(default_factory=list)
@@ -131,7 +131,7 @@ class CampaignPlan(APIModel):
     title: str
     summary: str
     tone: str
-    days: list[CampaignDaySpec] = Field(default_factory=list)
+    phases: list[CampaignPhaseSpec] = Field(default_factory=list)
 
 
 class CampaignGenerateRequest(BaseModel):
@@ -158,12 +158,13 @@ class CampaignUpdate(BaseModel):
     platforms: list[str] | None = None
 
 
-class CampaignDayRead(APIModel):
+class CampaignPhaseRead(APIModel):
     id: str
     campaign_id: str
-    day_number: int
+    phase_number: int = Field(validation_alias="day_number", serialization_alias="phase_number")
     theme: str
     objective: str
+    posts: list[GeneratedPostRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -173,7 +174,7 @@ class GeneratedPostRead(APIModel):
     campaign_id: str
     campaign_day_id: str
     platform: str
-    day_number: int
+    phase_number: int = Field(validation_alias="day_number", serialization_alias="phase_number")
     title: str
     content: str
     hashtags: list[str]
@@ -195,7 +196,11 @@ class CampaignRead(APIModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    days: list[CampaignDayRead] = Field(default_factory=list)
+    phases: list[CampaignPhaseRead] = Field(
+        default_factory=list,
+        validation_alias="days",
+        serialization_alias="phases",
+    )
 
 
 class CampaignDetail(CampaignRead):
@@ -221,6 +226,7 @@ class PlatformAccountBase(BaseModel):
     status: str = "planned"
     notes: str = ""
     phone_required: bool = False
+    session_path: str | None = None
 
 
 class PlatformAccountCreate(PlatformAccountBase):
@@ -236,6 +242,7 @@ class PlatformAccountUpdate(BaseModel):
     status: str | None = None
     notes: str | None = None
     phone_required: bool | None = None
+    session_path: str | None = None
 
 
 class PlatformAccountRead(PlatformAccountBase, APIModel):

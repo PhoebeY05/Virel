@@ -169,6 +169,7 @@ class PlatformAccount(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), default="planned", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     phone_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    session_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="platform_accounts")
 

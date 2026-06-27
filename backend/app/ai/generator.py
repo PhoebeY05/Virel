@@ -69,6 +69,24 @@ CAMPAIGN_PHASES: list[tuple[str, str, str]] = [
     ),
 ]
 
+CAMPAIGN_PHASE_POST_LABELS: list[list[tuple[str, str]]] = [
+    [
+        ("Teaser", "Build curiosity with a light preview of the problem and the upcoming launch."),
+        ("Question", "Invite the audience to share the pain point they want solved most."),
+        ("Founder story", "Make the team feel human by sharing why the project exists."),
+    ],
+    [
+        ("Announcement", "Lead with the official product reveal and the main call to action."),
+        ("Demo", "Show the product in action with a clear, practical walkthrough."),
+        ("Feature spotlight", "Highlight the standout feature that makes the launch memorable."),
+    ],
+    [
+        ("Update", "Share what has improved and why the product keeps getting better."),
+        ("Tutorial", "Teach one simple way to use the product well."),
+        ("Feedback", "Re-engage the audience by asking for thoughts, ideas, or experiences."),
+    ],
+]
+
 
 def _platform_style(platform: str) -> str:
     info = SUPPORTED_PLATFORM_MAP.get(platform)
@@ -101,17 +119,21 @@ def _fallback_campaign_plan(
     selected_platforms = platforms or platform_names()
     for index, ((theme, objective, angles), day_offset) in enumerate(zip(CAMPAIGN_PHASES, phase_offsets, strict=True), start=1):
         posts: list[CampaignPostPlan] = []
-        for platform_index, platform in enumerate(selected_platforms):
+        post_count = max(2, min(len(selected_platforms), 3))
+        for post_index in range(post_count):
+            platform = selected_platforms[post_index % len(selected_platforms)]
+            label, focus = CAMPAIGN_PHASE_POST_LABELS[index - 1][post_index % len(CAMPAIGN_PHASE_POST_LABELS[index - 1])]
             style = _platform_style(platform)
-            title = f"{project_name} Day {index}: {theme}"
+            title = f"{project_name} Day {index}: {theme} - {label}"
             content = (
                 f"{project_name} is built for {audience}. "
                 f"Today we focus on {theme.lower()} by showing how it helps with {goal}. "
+                f"This post leans into {focus.lower()}. "
                 f"Phase focus: {angles} "
                 f"Tone: {tone}. Platform style: {style}. "
                 f"Context: {description}"
             )
-            scheduled_at = now + timedelta(days=day_offset, hours=platform_index * 2)
+            scheduled_at = now + timedelta(days=day_offset, hours=post_index * 2)
             posts.append(
                 CampaignPostPlan(
                     platform=platform,
@@ -225,8 +247,8 @@ def validate_plan(plan: CampaignPlan) -> CampaignPlan:
     if day_numbers != [1, 2, 3]:
         raise PromptValidationError("Campaign day numbers must be exactly 1, 2, and 3")
     for day in plan.days:
-        if not day.posts:
-            raise PromptValidationError("Campaign phases must include at least one post")
+        if len(day.posts) < 2:
+            raise PromptValidationError("Campaign phases must include at least two posts")
         for post in day.posts:
             if post.platform not in platform_names():
                 raise PromptValidationError(f"Unsupported platform: {post.platform}")

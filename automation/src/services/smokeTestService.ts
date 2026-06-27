@@ -1,5 +1,5 @@
 import { BrowserManager } from "../browser/browserManager";
-import { PlatformName } from "../types/platform";
+import { BrowserChannel, PlatformName } from "../types/platform";
 
 const signupUrls: Record<PlatformName, string> = {
   instagram: "https://www.instagram.com/accounts/emailsignup/",
@@ -8,8 +8,14 @@ const signupUrls: Record<PlatformName, string> = {
   reddit: "https://www.reddit.com/register/",
   linkedin: "https://www.linkedin.com/signup/",
   tiktok: "https://www.tiktok.com/signup",
+  telegram: "https://web.telegram.org/k/",
   xiaohongshu: "https://www.xiaohongshu.com/",
+  hacker_news: "https://news.ycombinator.com/login",
   producthunt: "https://www.producthunt.com/sign-up"
+};
+
+const browserChannels: Partial<Record<PlatformName, BrowserChannel>> = {
+  reddit: "firefox"
 };
 
 export interface SmokeTestInput {
@@ -23,11 +29,15 @@ export interface SmokeTestInput {
   holdMs?: number;
 }
 
+export interface SmokeBatchInput {
+  runs: SmokeTestInput[];
+}
+
 export class SmokeTestService {
   constructor(private readonly browserManager = new BrowserManager()) {}
 
   async openSignup(input: SmokeTestInput): Promise<void> {
-    const managed = await this.browserManager.createContext(input.platform);
+    const managed = await this.browserManager.createContext(input.platform, browserChannels[input.platform]);
 
     try {
       await managed.page.goto(signupUrls[input.platform], { waitUntil: "domcontentloaded" });
@@ -35,6 +45,8 @@ export class SmokeTestService {
         await this.startGoogleSignup(managed.page, input.platform);
       } else if (input.platform === "instagram") {
         await this.fillInstagramSignup(managed.page, input);
+      } else if (input.platform === "telegram") {
+        console.log("[smoke] telegram opened the login flow. Complete sign-in manually in the browser.");
       } else {
         await this.fillFirstAvailable(managed.page, ["input[name='email']", "input[type='email']"], input.email ?? "");
         await this.fillFirstAvailable(
@@ -52,6 +64,13 @@ export class SmokeTestService {
       await new Promise((resolve) => setTimeout(resolve, holdMs));
     } finally {
       await this.browserManager.close();
+    }
+  }
+
+  async openBatchSignups(input: SmokeBatchInput): Promise<void> {
+    for (const [index, run] of input.runs.entries()) {
+      console.log(`[smoke] starting run ${index + 1}/${input.runs.length} for ${run.platform}`);
+      await this.openSignup(run);
     }
   }
 

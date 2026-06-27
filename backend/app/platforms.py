@@ -80,15 +80,6 @@ SUPPORTED_PLATFORMS: list[PlatformInfo] = [
         notes="Regional verification limits automation.",
     ),
     PlatformInfo(
-        name="Hacker News",
-        slug="hacker_news",
-        writing_style="Technical, honest, and discussion-friendly.",
-        requires_human_verification=False,
-        phone_required="rare",
-        automation_level="guidance-only",
-        notes="Prioritise transparency and signal over promotion.",
-    ),
-    PlatformInfo(
         name="Telegram",
         slug="telegram",
         writing_style="Direct, fast-moving, and community-driven.",

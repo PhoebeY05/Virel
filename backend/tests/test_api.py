@@ -4,10 +4,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.ai.generator import generate_campaign_plan, validate_plan
 from app.config import Settings
-from app.models import AnalyticsSnapshot
+from app.models import AnalyticsSnapshot, PlatformAccount
 from app.main import build_app
 
 
@@ -117,13 +118,46 @@ def test_project_crud(client: TestClient) -> None:
     assert response.json()["code"] == "PROJECT_NOT_FOUND"
 
 
+def test_project_delete_cascades_platform_accounts(client: TestClient) -> None:
+    project = create_project(client)
+
+    response = client.post(
+        f"/projects/{project['id']}/accounts",
+        json={
+            "platform": "instagram",
+            "username": "@virel",
+            "bio": "Launch updates and community announcements.",
+            "phone_required": False,
+        },
+    )
+    assert response.status_code == 201
+    account_id = response.json()["id"]
+
+    response = client.delete(f"/projects/{project['id']}")
+    assert response.status_code == 204
+
+    with client.app.state.SessionLocal() as db:
+        rows = db.scalars(select(PlatformAccount).where(PlatformAccount.project_id == project["id"])).all()
+    assert rows == []
+
+    response = client.get(f"/projects/{project['id']}/accounts")
+    assert response.status_code == 404
+    assert response.json()["code"] == "PROJECT_NOT_FOUND"
+
+    with client.app.state.SessionLocal() as db:
+        account = db.scalar(select(PlatformAccount).where(PlatformAccount.id == account_id))
+    assert account is None
+
+
 def test_campaign_generation_and_posts(client: TestClient) -> None:
     project = create_project(client)
     campaign = create_campaign(client, project["id"])
 
     assert campaign["project_id"] == project["id"]
-    assert len(campaign["days"]) == 3
+    assert campaign["status"] == "live"
+    assert len(campaign["phases"]) == 3
     assert len(campaign["posts"]) == 6
+    assert campaign["posts"][0]["status"] == "published"
 
     response = client.get("/campaigns")
     assert response.status_code == 200
@@ -133,6 +167,27 @@ def test_campaign_generation_and_posts(client: TestClient) -> None:
     assert response.status_code == 200
     posts = response.json()
     assert len(posts) == 6
+
+
+def test_campaign_generation_produces_multiple_posts_per_phase(client: TestClient) -> None:
+    project = create_project(client)
+
+    response = client.post(
+        "/campaigns/generate",
+        json={
+            "project_id": project["id"],
+            "goal": "drive signups",
+            "platforms": ["instagram"],
+            "tone": "confident",
+        },
+    )
+    assert response.status_code == 201
+    campaign = response.json()
+    assert campaign["status"] == "live"
+    assert len(campaign["phases"]) == 3
+    assert len(campaign["posts"]) == 6
+    assert campaign["posts"][0]["status"] == "published"
+    assert all(len(phase["posts"]) >= 2 for phase in campaign["phases"])
 
 
 def test_post_editing_and_regeneration(client: TestClient) -> None:
@@ -284,6 +339,62 @@ def test_automation_connect_endpoint(client: TestClient) -> None:
     assert len(response.json()) == 1
 
 
+def test_automation_smoke_batch_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    automation_dir = tmp_path / "automation"
+    automation_dir.mkdir()
+    monkeypatch.setenv("DISPLAY", ":1")
+    monkeypatch.setattr("app.api.routes.automation.resolve_automation_dir", lambda: automation_dir)
+
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 4321
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr("app.api.routes.automation.subprocess.Popen", fake_popen)
+
+    response = client.post(
+        "/automation/test-setup/batch",
+        json={
+            "runs": [
+                {
+                    "platform": "instagram",
+                    "signupMethod": "email",
+                    "email": "team@example.com",
+                    "username": "studysnapai-instagram",
+                    "displayName": "StudySnap AI",
+                    "bio": "Testing the Instagram launch flow.",
+                    "holdMs": 5000,
+                },
+                {
+                    "platform": "hacker_news",
+                    "signupMethod": "email",
+                    "username": "studysnapai-hn",
+                    "displayName": "StudySnap AI",
+                    "bio": "Testing the Hacker News launch flow.",
+                    "holdMs": 5000,
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "started"
+    assert body["pid"] == 4321
+    assert body["count"] == 2
+    assert body["platforms"] == ["instagram", "hacker_news"]
+    assert body["logPath"].startswith(str(automation_dir / "logs"))
+
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert "smoke-batch" in command
+
+
 def test_platform_account_crud(client: TestClient) -> None:
     project = create_project(client)
 
@@ -314,10 +425,12 @@ def test_platform_account_crud(client: TestClient) -> None:
         json={
             "status": "connected",
             "notes": "Connected in the simulator.",
+            "session_path": "/tmp/storage-state/telegram.json",
         },
     )
     assert response.status_code == 200
     assert response.json()["status"] == "connected"
+    assert response.json()["session_path"] == "/tmp/storage-state/telegram.json"
 
     response = client.delete(f"/accounts/{account['id']}")
     assert response.status_code == 204

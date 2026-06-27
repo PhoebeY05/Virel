@@ -39,15 +39,16 @@ export interface ApiCampaign {
   status?: string
   created_at?: string
   updated_at?: string
-  days?: ApiCampaignDay[]
+  phases?: ApiCampaignPhase[]
   posts?: ApiGeneratedPost[]
 }
 
-export interface ApiCampaignDay {
+export interface ApiCampaignPhase {
   id: string
-  day_number: number
+  phase_number: number
   theme: string
   objective: string
+  posts?: ApiGeneratedPost[]
 }
 
 export interface ApiGeneratedPost {
@@ -146,6 +147,7 @@ export interface ApiPlatformAccount {
   status: string
   notes: string
   phone_required: boolean
+  session_path?: string | null
   created_at: string
   updated_at: string
 }
@@ -217,7 +219,7 @@ export function fromApiProject(project: ApiProject): Project {
 export function fromApiCampaign(campaign: ApiCampaign): Campaign {
   const apiPosts = campaign.posts ?? []
   const posts = apiPosts.map(fromApiPost)
-  const days = (campaign.days ?? []).map((day) => fromApiDay(day, apiPosts))
+  const phases = (campaign.phases ?? []).map((phase) => fromApiPhase(phase, apiPosts))
 
   return {
     id: campaign.id,
@@ -227,7 +229,7 @@ export function fromApiCampaign(campaign: ApiCampaign): Campaign {
     goal: campaign.goal,
     platforms: (campaign.platforms ?? []).map(toPlatformName),
     status: fromApiCampaignStatus(campaign.status),
-    days,
+    days: phases,
     posts,
     summary: campaign.summary,
     tone: campaign.tone,
@@ -236,17 +238,18 @@ export function fromApiCampaign(campaign: ApiCampaign): Campaign {
   }
 }
 
-export function fromApiDay(day: ApiCampaignDay, posts: ApiGeneratedPost[]): CampaignDay {
-  const dayPosts = posts.filter((post) => post.campaign_day_id === day.id)
-  const firstPost = dayPosts[0]
+export function fromApiPhase(phase: ApiCampaignPhase, posts: ApiGeneratedPost[]): CampaignDay {
+  const phasePosts = phase.posts?.length ? phase.posts : posts.filter((post) => post.campaign_day_id === phase.id)
+  const firstPost = phasePosts[0]
   return {
-    id: day.id,
-    day: day.day_number,
-    title: day.theme,
-    platforms: dayPosts.map((post) => toPlatformName(post.platform)),
-    content: day.objective,
+    id: phase.id,
+    day: phase.phase_number,
+    title: phase.theme,
+    platforms: phasePosts.map((post) => toPlatformName(post.platform)),
+    content: phase.objective,
     scheduledTime: formatTime(firstPost?.scheduled_at),
     status: fromApiPostStatus(firstPost?.status),
+    posts: phasePosts.map(fromApiPost),
   }
 }
 
@@ -364,6 +367,7 @@ export function fromApiPlatformAccount(account: ApiPlatformAccount): PlatformAcc
     status: toPlatformAccountStatus(account.status),
     notes: account.notes,
     phoneRequired: account.phone_required,
+    sessionPath: account.session_path ?? null,
     createdAt: account.created_at,
     updatedAt: account.updated_at,
   }

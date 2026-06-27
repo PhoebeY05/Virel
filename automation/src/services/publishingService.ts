@@ -22,7 +22,14 @@ export class PublishingService {
     try {
       await adapter.login();
       await adapter.publishPost(post);
-      await adapter.saveSession();
+      const sessionPath = await adapter.saveSession();
+      if (setup.accountId) {
+        await this.backendClient.updateAccount(setup.accountId, {
+          status: "connected",
+          sessionPath,
+          message: "Session saved"
+        });
+      }
       await this.backendClient.updateAutomationSession(session.id, {
         status: "completed",
         message: "Post prepared/published successfully"

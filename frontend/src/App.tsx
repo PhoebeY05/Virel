@@ -20,14 +20,14 @@ import {
   Upload,
   WandSparkles,
 } from 'lucide-react'
-import type { ChangeEvent, ReactNode } from 'react'
+import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
-import { connectAutomation, getAutomationSessions, getPlatforms } from './services/automation'
+import { connectAutomation, getAutomationSessions, getPlatforms, resumeAutomationSession, startAutomationSmokeBatch } from './services/automation'
 import { createProjectAccount, getProjectAccounts } from './services/accounts'
-import { generateCampaign, getCampaigns, type GenerateCampaignInput } from './services/campaigns'
+import { generateCampaign, getCampaign, getCampaigns, updateCampaign, type GenerateCampaignInput } from './services/campaigns'
 import { uploadImage } from './services/media'
 import { createProject, deleteProject, getProjects, updateProject, type ProjectInput } from './services/projects'
 import { getUserSettings, updateUserSettings } from './services/settings'
@@ -458,6 +458,7 @@ function ProjectsView() {
   const [status, setStatus] = useState<ProjectStatus | 'All'>('All')
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const projects = projectsState.data ?? []
@@ -489,6 +490,20 @@ function ProjectsView() {
         projectsState.setData([created, ...projects])
         setIsCreating(false)
         if (settings && input.launchPlatforms.length > 0) {
+          const preparedLaunches = input.launchPlatforms.map((platform) => {
+            const accountInput = buildPlatformAccountInput(created, settings, platform)
+            return {
+              platform,
+              signupMethod: 'email' as const,
+              email: settings.supportEmail || settings.backupEmail || settings.googleAccountEmail || undefined,
+              username: accountInput.username,
+              password: undefined,
+              displayName: settings.displayName || settings.companyName || created.name,
+              bio: accountInput.bio || settings.brandBio || created.description || created.tagline,
+              holdMs: 15_000,
+            }
+          })
+
           await Promise.all(
             input.launchPlatforms.map((platform) =>
               Promise.all([
@@ -501,6 +516,15 @@ function ProjectsView() {
               ]),
             ),
           )
+
+          setActionMessage(`Project created and ${input.launchPlatforms.length} platform account(s) prepared.`)
+
+          try {
+            await startAutomationSmokeBatch({ runs: preparedLaunches })
+            setActionMessage(`Project created and browser setup launched for ${input.launchPlatforms.length} selected platform(s).`)
+          } catch (browserError) {
+            setActionError(browserError instanceof Error ? browserError.message : 'Browser launch failed.')
+          }
         }
       }
     } catch (error) {
@@ -513,8 +537,10 @@ function ProjectsView() {
     try {
       await deleteProject(id)
       projectsState.setData(projects.filter((project) => project.id !== id))
+      return true
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Project delete failed.')
+      return false
     }
   }
 
@@ -564,7 +590,8 @@ function ProjectsView() {
             ))}
           </select>
         </div>
-        {actionError && <p className="mt-4 text-sm font-medium text-[#b97fd6]">{actionError}</p>}
+        {actionMessage && <p className="mt-4 text-sm font-medium text-[#1f1814]">{actionMessage}</p>}
+        {actionError && <p className="mt-2 text-sm font-medium text-[#b97fd6]">{actionError}</p>}
       </section>
 
       {filtered.length === 0 ? (
@@ -592,6 +619,15 @@ function ProjectsView() {
             setIsCreating(false)
             setEditingProject(null)
           }}
+          onDelete={
+            editingProject
+              ? async () => {
+                  const deleted = await handleDelete(editingProject.id)
+                  if (deleted) setEditingProject(null)
+                  return deleted
+                }
+              : undefined
+          }
           onSave={handleSave}
         />
       )}
@@ -609,7 +645,7 @@ function ProjectCard({
   project: Project
   accent: string
   progress: number
-  onDelete: (id: string) => Promise<void>
+  onDelete: (id: string) => Promise<boolean>
   onEdit: (project: Project) => void
 }) {
   return (
@@ -711,11 +747,11 @@ function buildGuidedAutomationPayload(project: Project, settings: UserSettings, 
     display_name: settings.displayName || project.name,
     bio: settings.brandBio || project.description || project.tagline,
     profile_image_url: settings.profileImageUrl || project.logoUrl || null,
-    account_url: settings.websiteUrl || project.demoUrl || null,
+    account_url: resolvePlatformUrl(platform, null, project, settings),
     company_name: settings.companyName || project.name,
     legal_entity_name: settings.legalEntityName || project.name,
     company_start_date: settings.companyStartDate,
-    website_url: settings.websiteUrl || project.demoUrl || '',
+    website_url: settings.websiteUrl || '',
     support_email: settings.supportEmail,
     phone_number: settings.phoneNumber,
     country: settings.country,
@@ -740,7 +776,7 @@ function buildGuidedAutomationPayload(project: Project, settings: UserSettings, 
 function buildPlatformAccountInput(project: Project, settings: UserSettings, platform: PlatformName) {
   const bio = settings.brandBio || project.description || project.tagline
   const username = normalizeAutomationUsername(project.name, platform)
-  const accountUrl = settings.websiteUrl || project.demoUrl || null
+  const accountUrl = resolvePlatformUrl(platform, null, project, settings)
 
   return {
     platform,
@@ -791,6 +827,7 @@ function CampaignsView() {
   const [title, setTitle] = useState('')
   const [platforms, setPlatforms] = useState<PlatformName[]>(platformNames.slice(0, 3))
   const [generatedCampaign, setGeneratedCampaign] = useState<Campaign | null>(null)
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const projects = projectsState.data ?? []
@@ -814,6 +851,30 @@ function CampaignsView() {
       campaignsState.setData([campaign, ...campaigns])
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Campaign generation failed.')
+    }
+  }
+
+  async function handleUpdateCampaign(
+    campaignId: string,
+    patch: {
+      title: string
+      summary: string
+      goal: string
+      tone: string
+      status: string
+    },
+  ) {
+    setActionError(null)
+    try {
+      const updated = await updateCampaign(campaignId, patch)
+      campaignsState.setData(campaigns.map((campaign) => (campaign.id === updated.id ? updated : campaign)))
+      if (generatedCampaign?.id === updated.id) {
+        setGeneratedCampaign(updated)
+      }
+      setEditingCampaign((current) => (current?.id === updated.id ? updated : current))
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Campaign update failed.')
+      throw error
     }
   }
 
@@ -893,7 +954,18 @@ function CampaignsView() {
           </div>
 
           <div className={`${paperCard} p-5`}>
-            <SectionHeader eyebrow="Preview" title="Campaign reel" />
+            <SectionHeader
+              eyebrow="Preview"
+              title="Campaign reel"
+              action={
+                previewCampaign ? (
+                  <DashboardAction onClick={() => setEditingCampaign(previewCampaign)} tone="coral">
+                    <PencilLine className="h-4 w-4" />
+                    Edit campaign
+                  </DashboardAction>
+                ) : undefined
+              }
+            />
             {previewCampaign ? (
               <div className="mt-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
@@ -926,6 +998,21 @@ function CampaignsView() {
                     </div>
                   ))}
                 </div>
+
+                {previewCampaign.posts.length > 0 && (
+                  <div className="rounded-[28px] border-[2px] border-dashed border-[#2c211b] bg-[#f7fff9] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#7ea8ff]">Live first post</p>
+                        <p className="mt-1 text-sm leading-6 text-[#5f554a]">The first generated post is published immediately. The rest stay available for review below.</p>
+                      </div>
+                      <StatusBadge status={previewCampaign.posts[0].status} />
+                    </div>
+                    <div className="mt-4">
+                      <CampaignPostCard post={previewCampaign.posts[0]} />
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <EmptyState title="No campaign yet." description="Generate one to see the plan expand." compact />
@@ -939,7 +1026,7 @@ function CampaignsView() {
         {campaigns.length === 0 ? (
           <EmptyState title="No campaigns yet." description="Generate the first campaign to populate this shelf." compact />
         ) : (
-          <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              <div className="mt-5 grid gap-4 xl:grid-cols-2">
             {campaigns.map((campaign) => (
               <div key={campaign.id} className="rounded-[28px] border-[2px] border-[#2c211b] bg-white p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
                 <div className="flex items-start justify-between gap-3">
@@ -955,11 +1042,25 @@ function CampaignsView() {
                   <MiniStat label="Tone" value={campaign.tone || 'Confident'} />
                   <MiniStat label="Platforms" value={campaign.platforms.join(', ')} />
                 </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button className={secondaryLink} type="button" onClick={() => setEditingCampaign(campaign)}>
+                    <PencilLine className="h-4 w-4" />
+                    Edit campaign
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
       </section>
+
+      {editingCampaign && (
+        <CampaignEditorModal
+          campaign={editingCampaign}
+          onCancel={() => setEditingCampaign(null)}
+          onSave={(patch) => handleUpdateCampaign(editingCampaign.id, patch)}
+        />
+      )}
     </div>
   )
 }
@@ -989,6 +1090,86 @@ function PlatformChooser({
         )
       })}
     </div>
+  )
+}
+
+function CampaignEditorModal({
+  campaign,
+  onCancel,
+  onSave,
+}: {
+  campaign: Campaign
+  onCancel: () => void
+  onSave: (patch: {
+    title: string
+    summary: string
+    goal: string
+    tone: string
+    status: string
+  }) => Promise<void>
+}) {
+  const [title, setTitle] = useState(campaign.name)
+  const [summary, setSummary] = useState(campaign.summary ?? campaign.audience ?? '')
+  const [goal, setGoal] = useState(campaign.goal)
+  const [tone, setTone] = useState(campaign.tone ?? 'Confident')
+  const [status, setStatus] = useState<Campaign['status']>(campaign.status)
+  const [saving, setSaving] = useState(false)
+  const campaignStatuses = ['Draft', 'Scheduled', 'Live', 'Complete'] as const
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await onSave({ title, summary, goal, tone, status })
+      onCancel()
+    } catch {
+      // The parent surfaces the error message; keep the modal open for fixes.
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Edit campaign" onClose={onCancel}>
+      <form className="mt-6 grid gap-4" onSubmit={(event) => void handleSubmit(event)}>
+        <Field label="Campaign title" description="Update the public campaign name.">
+          <input className={inputField} value={title} onChange={(event) => setTitle(event.target.value)} />
+        </Field>
+        <Field label="Campaign summary" description="A short description for the campaign card and preview.">
+          <textarea className={textareaField} value={summary} onChange={(event) => setSummary(event.target.value)} />
+        </Field>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Campaign goal" description="The action you want the campaign to drive.">
+            <input className={inputField} value={goal} onChange={(event) => setGoal(event.target.value)} />
+          </Field>
+          <Field label="Tone" description="The voice used when generating campaign content.">
+            <select className={inputField} value={tone} onChange={(event) => setTone(event.target.value)}>
+              {TONE_OPTIONS.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label="Campaign status" description="Controls the badge shown in Campaigns and Automation.">
+          <select className={inputField} value={status} onChange={(event) => setStatus(event.target.value as Campaign['status'])}>
+            {campaignStatuses.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </Field>
+        <p className="text-xs leading-5 text-[#6b625a]">
+          The phase posts stay attached to this campaign, so editing here updates the wrapper without losing the generated content.
+        </p>
+        <div className="mt-2 flex flex-wrap justify-end gap-3">
+          <button className={secondaryLink} type="button" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+          <button className="rounded-full border-[2px] border-[#2c211b] bg-[#2c211b] px-5 py-3 text-sm font-black text-[#fffaf4] shadow-[6px_6px_16px_rgba(45,33,26,0.06)] disabled:opacity-60" disabled={saving} type="submit">
+            {saving ? 'Saving…' : 'Save campaign'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -1118,6 +1299,7 @@ function AutomationView() {
   const platformsState = useAsync(getPlatforms)
   const settingsState = useAsync(getUserSettings)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [activePlatform, setActivePlatform] = useState<PlatformName | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -1141,16 +1323,39 @@ function AutomationView() {
     setActivePlatform(null)
   }, [selectedProjectId])
 
+  const currentProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  )
+  const currentProjectCampaigns = useMemo(
+    () => campaigns.filter((campaign) => campaign.projectId === currentProject?.id),
+    [campaigns, currentProject?.id],
+  )
+
+  useEffect(() => {
+    if (!currentProjectCampaigns.length) {
+      setSelectedCampaignId(null)
+      return
+    }
+    if (!selectedCampaignId || !currentProjectCampaigns.some((campaign) => campaign.id === selectedCampaignId)) {
+      setSelectedCampaignId(currentProjectCampaigns[0].id)
+    }
+  }, [currentProjectCampaigns, selectedCampaignId])
+
   const accountsLoader = useMemo<() => Promise<PlatformAccount[]>>(() => {
     if (!selectedProjectId) return async () => [] as PlatformAccount[]
     return () => getProjectAccounts(selectedProjectId)
   }, [selectedProjectId])
   const accountsState = useAsync(accountsLoader)
   const accounts = accountsState.data ?? []
-  const currentProject = projects.find((project) => project.id === selectedProjectId) ?? null
   const accountByPlatform = useMemo(() => new Map(accounts.map((account) => [account.platform, account])), [accounts])
   const activeAccount = activePlatform ? accountByPlatform.get(activePlatform) ?? null : null
-  const currentProjectCampaigns = campaigns.filter((campaign) => campaign.projectId === currentProject?.id)
+  const campaignLoader = useMemo<() => Promise<Campaign | null>>(() => {
+    if (!selectedCampaignId) return async () => null
+    return () => getCampaign(selectedCampaignId)
+  }, [selectedCampaignId])
+  const campaignState = useAsync(campaignLoader)
+  const currentCampaign = campaignState.data?.id === selectedCampaignId ? campaignState.data : null
   const connectedCount = accounts.filter((account) => account.status === 'Connected').length
   const needsReviewCount = accounts.filter((account) => account.status === 'Needs verification' || account.status === 'Pending').length
 
@@ -1165,6 +1370,18 @@ function AutomationView() {
       setActionMessage(`${platform} account prepared.`)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to prepare account.')
+    }
+  }
+
+  async function handleResumeAccount(platform: PlatformName) {
+    if (!currentProject) return
+    setActionError(null)
+    setActionMessage(null)
+    try {
+      const result = await resumeAutomationSession(currentProject.id, platform)
+      setActionMessage(result.message)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to resume session.')
     }
   }
 
@@ -1242,6 +1459,74 @@ function AutomationView() {
         {actionError && <p className="mt-2 text-sm font-medium text-[#b97fd6]">{actionError}</p>}
       </section>
 
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <SectionHeader
+            eyebrow="Campaign posts"
+            title="Phases and posts"
+            description="Choose a campaign to inspect the full phase breakdown. Each phase contains multiple post ideas so automation has real content to work with."
+          />
+          <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[520px]">
+            <MiniStat label="Campaigns" value={currentProjectCampaigns.length.toString()} />
+            <MiniStat label="Posts" value={currentCampaign?.posts.length.toString() ?? '0'} />
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+          <div className={`${insetCard} p-5`}>
+            <div className="grid gap-4">
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Campaign</span>
+                <select
+                  className="mt-2 w-full rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.04)] outline-none"
+                  value={selectedCampaignId ?? ''}
+                  onChange={(event) => setSelectedCampaignId(event.target.value)}
+                >
+                  {currentProjectCampaigns.map((campaign) => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <MiniStat label="Status" value={currentCampaign?.status ?? 'Draft'} />
+                <MiniStat label="Phases" value={currentCampaign?.days.length.toString() ?? '0'} />
+                <MiniStat label="Posts" value={currentCampaign?.posts.length.toString() ?? '0'} />
+              </div>
+
+              {campaignState.error && <p className="text-sm font-medium text-[#b97fd6]">{campaignState.error}</p>}
+              {campaignState.isLoading && !currentCampaign && (
+                <p className="text-sm leading-6 text-[#5f554a]">Loading campaign posts...</p>
+              )}
+              {!campaignState.isLoading && !currentCampaign && !campaignState.error && (
+                <EmptyState
+                  compact
+                  title="No campaign selected."
+                  description="Generate a campaign in the Campaigns tab and come back here to review the phase posts."
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+            <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#7ea8ff]">Sequence view</p>
+            <p className="mt-2 text-sm leading-6 text-[#5f554a]">
+              The automation dock now mirrors the campaign timeline, so every phase can expand into several posts before setup begins.
+            </p>
+          </div>
+        </div>
+
+        {currentCampaign && (
+          <div className="mt-6 grid gap-4">
+            {currentCampaign.days.map((day) => (
+              <CampaignPhaseCard key={day.id} day={day} />
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {platforms.map((platform) => {
           const account = accountByPlatform.get(platform.name)
@@ -1268,7 +1553,7 @@ function AutomationView() {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <span className={`rounded-full border-[2px] border-[#2c211b] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${account ? 'bg-[#d9f1e5]' : 'bg-[#fde2cf]'}`}>
-                  {account ? 'Open preview' : 'Prepare'}
+                  {account?.sessionPath ? 'Session saved' : account ? 'Open login' : 'Prepare'}
                 </span>
                 <span className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#6b625a]">
                   {platform.phoneRequired ? 'Phone likely required' : 'Email-first'}
@@ -1291,9 +1576,90 @@ function AutomationView() {
             project={currentProject}
             settings={settings}
             onPrepareAccount={() => void handlePrepareAccount(modalPlatform.name)}
+            onResumeSession={() => void handleResumeAccount(modalPlatform.name)}
           />
         </Modal>
       )}
+    </div>
+  )
+}
+
+function CampaignPhaseCard({ day }: { day: Campaign['days'][number] }) {
+  return (
+    <article className={`${paperCard} p-5 sm:p-6`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-[11px] font-black uppercase tracking-[0.32em] text-[#b97fd6]">Phase {day.day}</p>
+          <h3 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">{day.title}</h3>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-[#5f554a]">{day.content}</p>
+        </div>
+        <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end">
+          <StatusBadge status={day.status} />
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-[#6b625a]">Starts {day.scheduledTime}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {day.platforms.length > 0 ? (
+          day.platforms.map((platform) => (
+            <span
+              key={`${day.id}-${platform}`}
+              className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#1f1814]"
+            >
+              {platform}
+            </span>
+          ))
+        ) : (
+          <span className="rounded-full border-[2px] border-[#2c211b] bg-[#fde2cf] px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#1f1814]">
+            No platforms yet
+          </span>
+        )}
+      </div>
+
+      <div className="mt-5 grid gap-3 xl:grid-cols-2">
+        {day.posts?.length ? (
+          day.posts.map((post) => <CampaignPostCard key={post.id} post={post} />)
+        ) : (
+          <EmptyState
+            compact
+            title="No posts attached yet."
+            description="This phase will fill in once the campaign detail is loaded with generated posts."
+          />
+        )}
+      </div>
+    </article>
+  )
+}
+
+function CampaignPostCard({ post }: { post: Campaign['posts'][number] }) {
+  return (
+    <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#7ea8ff]">{post.platform}</p>
+          <h4 className="mt-2 break-words font-black text-[#1f1814]">{post.title}</h4>
+        </div>
+        <StatusBadge status={post.status} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {post.scheduledTime && (
+          <span className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#6b625a]">
+            {post.scheduledTime}
+          </span>
+        )}
+        {post.hashtags?.slice(0, 3).map((tag) => (
+          <span
+            key={`${post.id}-${tag}`}
+            className="rounded-full border-[2px] border-[#2c211b] bg-[#d9f1e5] px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#1f1814]"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-[#5f554a]">{post.content}</p>
+      {post.callToAction && <p className="mt-3 text-sm font-bold text-[#1f1814]">CTA: {post.callToAction}</p>}
     </div>
   )
 }
@@ -1304,52 +1670,32 @@ function PhoneSimulator({
   project,
   settings,
   onPrepareAccount,
+  onResumeSession,
 }: {
   account: PlatformAccount | null
   platform: Platform
   project: Project | null
   settings: UserSettings | null
   onPrepareAccount: () => void
+  onResumeSession: () => void
 }) {
   const profileUrl = resolvePlatformUrl(platform.name, account, project, settings)
   const username = account?.username || normalizeAutomationUsername(project?.name ?? 'Virel', platform.name)
   const status = account?.status ?? (platform.phoneRequired ? 'Needs verification' : 'Pending')
-  const isConnected = account?.status === 'Connected'
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <div className="rounded-[34px] border-[2px] border-[#2c211b] bg-[#0f0f12] p-3 shadow-[10px_10px_24px_rgba(45,33,26,0.08)]">
-        <div className="overflow-hidden rounded-[28px] border-[1px] border-white/10 bg-[#f8f4ee]">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2c211b]/10 px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[0.32em] text-[#7ea8ff]">{project?.name ?? 'Project'}</p>
-              <p className="mt-1 truncate text-sm font-black text-[#1f1814]">{platform.name} mobile view</p>
-            </div>
-            <a
-              className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#1f1814]"
-              href={profileUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              Open live site
-            </a>
+      <div className="mx-auto w-full max-w-[430px] rounded-[36px] border-[2px] border-[#2c211b] bg-white shadow-[0_12px_30px_rgba(45,33,26,0.12)]">
+        <div className="flex items-center gap-2 border-b border-[#2c211b]/10 px-4 py-3">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#fde2cf]" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[#fff0bc]" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[#d9f1e5]" />
+          <div className="ml-2 min-w-0 flex-1 rounded-full border border-[#2c211b]/10 bg-[#f8f4ee] px-3 py-2 text-[11px] font-medium text-[#6b625a]">
+            {profileUrl}
           </div>
-
-          <div className="px-3 pb-3 pt-3">
-            <div className="mx-auto max-w-[420px] rounded-[36px] border-[2px] border-[#2c211b] bg-white shadow-[0_12px_30px_rgba(45,33,26,0.12)]">
-              <div className="flex items-center gap-2 border-b border-[#2c211b]/10 px-4 py-3">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#fde2cf]" />
-                <span className="h-2.5 w-2.5 rounded-full bg-[#fff0bc]" />
-                <span className="h-2.5 w-2.5 rounded-full bg-[#d9f1e5]" />
-                <div className="ml-2 min-w-0 flex-1 rounded-full border border-[#2c211b]/10 bg-[#f8f4ee] px-3 py-2 text-[11px] font-medium text-[#6b625a]">
-                  {profileUrl}
-                </div>
-              </div>
-              <div className="h-[72vh] min-h-[620px] overflow-hidden bg-white">
-                <iframe className="h-full w-full border-0 bg-white" src={profileUrl} title={`${platform.name} live preview`} />
-              </div>
-            </div>
-          </div>
+        </div>
+        <div className="h-[72vh] min-h-[620px] overflow-hidden bg-white">
+          <iframe className="h-full w-full border-0 bg-white" src={profileUrl} title={`${platform.name} live preview`} />
         </div>
       </div>
 
@@ -1365,8 +1711,13 @@ function PhoneSimulator({
               Status: <span className="font-black text-[#1f1814]">{status}</span>
             </p>
             <p>
-              Mode: <span className="font-black text-[#1f1814]">{isConnected ? 'Logged in' : 'Preview'}</span>
+              Mode: <span className="font-black text-[#1f1814]">{account?.sessionPath ? 'Saved session' : 'Preview'}</span>
             </p>
+            {account?.sessionPath && (
+              <p>
+                Session: <span className="font-black text-[#1f1814]">Saved</span>
+              </p>
+            )}
             <p>{platform.notes}</p>
           </div>
         </div>
@@ -1379,13 +1730,21 @@ function PhoneSimulator({
           </p>
         </div>
 
-        {!account && (
+        {!account ? (
           <button
             className="w-full rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff] px-5 py-3 text-sm font-black text-[#1f1814]"
             type="button"
             onClick={onPrepareAccount}
           >
             Prepare account
+          </button>
+        ) : (
+          <button
+            className="w-full rounded-full border-[2px] border-[#2c211b] bg-[#d9f1e5] px-5 py-3 text-sm font-black text-[#1f1814]"
+            type="button"
+            onClick={onResumeSession}
+          >
+            {account.sessionPath ? 'Resume saved session' : 'Open login flow'}
           </button>
         )}
       </aside>
@@ -1394,23 +1753,64 @@ function PhoneSimulator({
 }
 
 function resolvePlatformUrl(platform: PlatformName, account: PlatformAccount | null, project: Project | null, settings: UserSettings | null) {
-  const explicit = account?.accountUrl || (platform === 'LinkedIn' ? settings?.linkedinUrl : '') || settings?.websiteUrl || project?.demoUrl || ''
-  if (explicit) return explicit
+  const accountUrl = account?.accountUrl
+  if (accountUrl && isSocialAccountUrl(platform, accountUrl)) {
+    return accountUrl
+  }
 
-  const slug = (account?.username || normalizeAutomationUsername(project?.name ?? 'Virel', platform))
+  const slug = normalizeAutomationUsername(
+    project?.name ?? 'Virel',
+    platform,
+  )
     .toLowerCase()
     .replace(/^@/, '')
     .replace(/^u\//, '')
 
-  if (platform === 'Instagram') return `https://www.instagram.com/${slug}/`
-  if (platform === 'Facebook') return 'https://www.facebook.com/'
-  if (platform === 'X') return `https://x.com/${slug}`
-  if (platform === 'Reddit') return `https://www.reddit.com/user/${slug}/`
-  if (platform === 'LinkedIn') return settings?.linkedinUrl || 'https://www.linkedin.com/'
-  if (platform === 'TikTok') return `https://www.tiktok.com/@${slug}`
-  if (platform === 'Telegram') return `https://t.me/${slug}`
+  if (platform === 'Instagram') {
+    const handle = normalizeHandle(settings?.instagramHandle || account?.username || slug)
+    return `https://www.instagram.com/${handle}/`
+  }
+  if (platform === 'Facebook') {
+    const handle = normalizeHandle(account?.username || slug)
+    return `https://www.facebook.com/${handle}`
+  }
+  if (platform === 'X') {
+    const handle = normalizeHandle(settings?.xHandle || account?.username || slug)
+    return `https://x.com/${handle}`
+  }
+  if (platform === 'Reddit') {
+    const handle = normalizeHandle(settings?.redditUsername || account?.username || slug, 'u/')
+    return `https://www.reddit.com/user/${handle.replace(/^u\//, '')}/`
+  }
+  if (platform === 'LinkedIn') return settings?.linkedinUrl || 'https://www.linkedin.com/feed/'
+  if (platform === 'TikTok') {
+    const handle = normalizeHandle(settings?.tiktokHandle || account?.username || slug)
+    return `https://www.tiktok.com/@${handle}`
+  }
+  if (platform === 'Telegram') {
+    const handle = normalizeHandle(account?.username || slug)
+    return `https://t.me/${handle}`
+  }
   if (platform === 'Hacker News') return 'https://news.ycombinator.com/'
-  return 'https://www.google.com'
+  return 'https://www.linkedin.com/feed/'
+}
+
+function normalizeHandle(value: string, prefix = '@') {
+  const cleaned = value.trim().replace(/^@+/, '').replace(/^u\//, '')
+  return prefix === 'u/' ? `${prefix}${cleaned}` : cleaned
+}
+
+function isSocialAccountUrl(platform: PlatformName, url: string) {
+  const normalized = url.toLowerCase()
+  if (platform === 'Instagram') return normalized.includes('instagram.com')
+  if (platform === 'Facebook') return normalized.includes('facebook.com')
+  if (platform === 'X') return normalized.includes('x.com') || normalized.includes('twitter.com')
+  if (platform === 'Reddit') return normalized.includes('reddit.com')
+  if (platform === 'LinkedIn') return normalized.includes('linkedin.com')
+  if (platform === 'TikTok') return normalized.includes('tiktok.com')
+  if (platform === 'Telegram') return normalized.includes('t.me') || normalized.includes('telegram.me')
+  if (platform === 'Hacker News') return normalized.includes('news.ycombinator.com')
+  return false
 }
 
 function SettingsView() {
@@ -1738,11 +2138,13 @@ function ProjectModal({
   initial,
   settings,
   onCancel,
+  onDelete,
   onSave,
 }: {
   initial?: Project
   settings?: UserSettings | null
   onCancel: () => void
+  onDelete?: () => Promise<boolean>
   onSave: (values: ProjectFormValues) => Promise<void>
 }) {
   const [name, setName] = useState(initial?.name ?? '')
@@ -1754,6 +2156,8 @@ function ProjectModal({
   const [demoUrl, setDemoUrl] = useState(initial?.demoUrl ?? '')
   const [logoUrl, setLogoUrl] = useState(initial?.logoUrl ?? '')
   const [launchPlatforms, setLaunchPlatforms] = useState<PlatformName[]>([])
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   function toggleLaunchPlatform(platform: PlatformName) {
     setLaunchPlatforms((current) =>
@@ -1761,27 +2165,45 @@ function ProjectModal({
     )
   }
 
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await onSave({
+        project: {
+          name,
+          description,
+          targetAudience,
+          goal,
+          status,
+          repoUrl: repoUrl || null,
+          demoUrl: demoUrl || null,
+          logoUrl: logoUrl || null,
+        },
+        launchPlatforms,
+      })
+      onCancel()
+    } catch {
+      // The parent surfaces the error message; keep the modal open for fixes.
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!onDelete) return
+    setDeleting(true)
+    try {
+      const deleted = await onDelete()
+      if (deleted) onCancel()
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <Modal title={initial ? 'Edit project' : 'Create project'} onClose={onCancel}>
-      <form
-        className="mt-6 grid gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void onSave({
-            project: {
-              name,
-              description,
-              targetAudience,
-              goal,
-              status,
-              repoUrl: repoUrl || null,
-              demoUrl: demoUrl || null,
-              logoUrl: logoUrl || null,
-            },
-            launchPlatforms,
-          })
-        }}
-      >
+      <form className="mt-6 grid gap-4" onSubmit={(event) => void handleSubmit(event)}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Project name" description="The public name of the project." className="md:col-span-2">
             <input className={inputField} value={name} onChange={(event) => setName(event.target.value)} />
@@ -1833,13 +2255,32 @@ function ProjectModal({
           )}
         </div>
 
-        <div className="mt-2 flex flex-wrap justify-end gap-3">
-          <button className={secondaryLink} type="button" onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="rounded-full border-[2px] border-[#2c211b] bg-[#2c211b] px-5 py-3 text-sm font-black text-[#fffaf4] shadow-[6px_6px_16px_rgba(45,33,26,0.06)]" type="submit">
-            Save project
-          </button>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-3">
+            {initial && onDelete && (
+              <button
+                className={dangerLink}
+                disabled={saving || deleting}
+                type="button"
+                onClick={() => void handleDeleteProject()}
+              >
+                <Trash2 className="h-4 w-4" />
+                {deleting ? 'Deleting…' : 'Delete project'}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap justify-end gap-3">
+            <button className={secondaryLink} type="button" onClick={onCancel} disabled={saving || deleting}>
+              Cancel
+            </button>
+            <button
+              className="rounded-full border-[2px] border-[#2c211b] bg-[#2c211b] px-5 py-3 text-sm font-black text-[#fffaf4] shadow-[6px_6px_16px_rgba(45,33,26,0.06)] disabled:opacity-60"
+              disabled={saving || deleting}
+              type="submit"
+            >
+              {saving ? 'Saving…' : 'Save project'}
+            </button>
+          </div>
         </div>
       </form>
     </Modal>
@@ -2025,6 +2466,8 @@ const inputField = inputFieldClass()
 const textareaField = `${inputField} min-h-[120px] resize-y`
 const secondaryLink =
   'inline-flex items-center justify-center gap-2 rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.04)] transition hover:bg-[#fffaf4]'
+const dangerLink =
+  'inline-flex items-center justify-center gap-2 rounded-full border-[2px] border-[#b83d3d] bg-[#fff1f1] px-4 py-3 text-sm font-black text-[#8a1d1d] shadow-[6px_6px_16px_rgba(45,33,26,0.04)] transition hover:bg-[#ffe5e5] disabled:cursor-not-allowed disabled:opacity-60'
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value)

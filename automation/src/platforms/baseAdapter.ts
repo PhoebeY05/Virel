@@ -2,7 +2,7 @@ import { BrowserContext, Page } from "playwright";
 import { BrowserManager } from "../browser/browserManager";
 import { throwIfVerificationRequired } from "../browser/safety";
 import { captureFailureScreenshot } from "../browser/screenshots";
-import { AccountSetup, PlatformAdapter, PlatformName, Post } from "../types/platform";
+import { AccountSetup, BrowserChannel, PlatformAdapter, PlatformName, Post } from "../types/platform";
 import { AutomationError, UserVerificationRequiredError } from "../utils/errors";
 import { normalizeOptionalPath } from "../utils/fs";
 import { waitForUserConfirmation } from "../utils/userPrompt";
@@ -17,12 +17,14 @@ export interface PlatformDefinition {
   supportsAutomatedSignup: boolean;
   supportsAutomatedProfile: boolean;
   supportsAutomatedPublishing: boolean;
+  browserChannel?: BrowserChannel;
 }
 
 export abstract class BasePlatformAdapter implements PlatformAdapter {
   protected page!: Page;
   protected context!: BrowserContext;
   protected hadStoredSession = false;
+  protected sessionKey!: string;
 
   constructor(
     protected readonly setup: AccountSetup,
@@ -31,7 +33,8 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
   ) {}
 
   async init(): Promise<void> {
-    const managed = await this.browserManager.createContext(this.definition.platform);
+    this.sessionKey = this.setup.accountId ?? this.definition.platform;
+    const managed = await this.browserManager.createContext(this.sessionKey, this.definition.browserChannel);
     this.page = managed.page;
     this.context = managed.context;
     this.hadStoredSession = managed.hadStoredSession;
@@ -109,9 +112,9 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     await this.pauseForUser("Log out manually if needed.");
   }
 
-  async saveSession(): Promise<void> {
+  async saveSession(): Promise<string> {
     await this.ensureInitialized();
-    await this.browserManager.saveSession(this.definition.platform, this.context);
+    return this.browserManager.saveSession(this.sessionKey, this.context);
   }
 
   async restoreSession(): Promise<boolean> {

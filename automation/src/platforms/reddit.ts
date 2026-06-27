@@ -13,7 +13,8 @@ export class RedditAdapter extends BasePlatformAdapter {
       postUrl: "https://www.reddit.com/submit/",
       supportsAutomatedSignup: true,
       supportsAutomatedProfile: true,
-      supportsAutomatedPublishing: true
+      supportsAutomatedPublishing: true,
+      browserChannel: "firefox"
     });
   }
 

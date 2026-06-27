@@ -10,7 +10,9 @@ import {
   CampaignPostSchema,
   CampaignSchema,
   Project,
-  ProjectSchema
+  ProjectSchema,
+  UserSettings,
+  UserSettingsSchema
 } from "../types/backend";
 import { AutomationStatus } from "../types/platform";
 
@@ -35,6 +37,11 @@ export class BackendClient {
   async getProjectAccounts(projectId: string): Promise<Account[]> {
     const response = await this.http.get(`/projects/${projectId}/accounts`);
     return AccountSchema.array().parse(response.data);
+  }
+
+  async getUserSettings(): Promise<UserSettings> {
+    const response = await this.http.get("/settings");
+    return UserSettingsSchema.parse(response.data);
   }
 
   async getCampaign(campaignId: string): Promise<Campaign> {

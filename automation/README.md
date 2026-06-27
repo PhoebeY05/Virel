@@ -32,6 +32,10 @@ npm run setup -- '{"projectId":"p1","accountId":"a1","platform":"reddit","email"
 ```
 
 ```bash
+npm run smoke-batch -- '{"runs":[{"platform":"instagram","username":"studysnapai-instagram","displayName":"StudySnap AI"},{"platform":"reddit","username":"u/studysnapai","displayName":"StudySnap AI"}]}'
+```
+
+```bash
 npm run publish -- '{"projectId":"p1","accountId":"a1","platform":"x","displayName":"StudySnap AI","username":"studysnapai"}' '{"campaignId":"c1","postId":"post1","accountId":"a1","platform":"x","text":"We just launched StudySnap AI."}'
 ```
 

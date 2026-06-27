@@ -25,6 +25,38 @@ export interface AutomationSessionCreateInput {
   payload?: Record<string, unknown>
 }
 
+export interface AutomationSmokeRunInput {
+  platform: PlatformName
+  signupMethod?: 'email' | 'google'
+  email?: string
+  username: string
+  password?: string
+  displayName: string
+  bio?: string
+  holdMs?: number
+}
+
+export interface AutomationSmokeBatchInput {
+  runs: AutomationSmokeRunInput[]
+}
+
+export interface AutomationSmokeBatchResult {
+  status: string
+  pid: number
+  platforms: string[]
+  count: number
+  logPath: string
+  message: string
+}
+
+export interface AutomationResumeResult {
+  status: string
+  pid: number
+  platform: string
+  logPath: string
+  message: string
+}
+
 export async function getPlatforms(): Promise<Platform[]> {
   const response = await apiRequest<ApiSupportedPlatform[]>('/platforms')
   return response.map(fromApiPlatform).filter((platform): platform is Platform => platform !== null)
@@ -84,4 +116,32 @@ export async function getAutomationSession(sessionId: string): Promise<Automatio
 export async function getAutomationSessions(): Promise<AutomationSession[]> {
   const response = await apiRequest<ApiAutomationSession[]>('/automation/sessions')
   return response.map(fromApiAutomationSession)
+}
+
+export async function startAutomationSmokeBatch(input: AutomationSmokeBatchInput): Promise<AutomationSmokeBatchResult> {
+  return apiRequest<AutomationSmokeBatchResult>('/automation/test-setup/batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      runs: input.runs.map((run) => ({
+        platform: run.platform.toLowerCase().replaceAll(' ', '_'),
+        signupMethod: run.signupMethod ?? 'email',
+        email: run.email ?? undefined,
+        username: run.username,
+        password: run.password ?? undefined,
+        displayName: run.displayName,
+        bio: run.bio ?? undefined,
+        holdMs: run.holdMs ?? 15_000,
+      })),
+    }),
+  })
+}
+
+export async function resumeAutomationSession(projectId: string, platform: PlatformName): Promise<AutomationResumeResult> {
+  return apiRequest<AutomationResumeResult>('/automation/resume-session', {
+    method: 'POST',
+    body: JSON.stringify({
+      project_id: projectId,
+      platform: platform.toLowerCase().replaceAll(' ', '_'),
+    }),
+  })
 }

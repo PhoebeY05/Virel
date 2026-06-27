@@ -8,17 +8,17 @@ import { fromAutomationRoot } from "../utils/paths";
 export class SessionStore {
   private readonly sessionDir = fromAutomationRoot(env.SESSION_DIR);
 
-  async getStatePath(platform: PlatformName): Promise<string> {
+  async getStatePath(sessionKey: string): Promise<string> {
     await ensureDir(this.sessionDir);
-    return path.join(this.sessionDir, `${platform}.json`);
+    return path.join(this.sessionDir, `${sessionKey}.json`);
   }
 
-  async hasSession(platform: PlatformName): Promise<boolean> {
-    return fileExists(await this.getStatePath(platform));
+  async hasSession(sessionKey: string): Promise<boolean> {
+    return fileExists(await this.getStatePath(sessionKey));
   }
 
-  async save(platform: PlatformName, context: BrowserContext): Promise<string> {
-    const statePath = await this.getStatePath(platform);
+  async save(sessionKey: string, context: BrowserContext): Promise<string> {
+    const statePath = await this.getStatePath(sessionKey);
     await context.storageState({ path: statePath });
     return statePath;
   }

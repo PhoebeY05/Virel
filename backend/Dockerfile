@@ -24,7 +24,7 @@ COPY automation ./automation
 
 WORKDIR /app/automation
 RUN npm ci
-RUN npx playwright install --with-deps chromium
+RUN npx playwright install --with-deps chromium firefox
 
 WORKDIR /app
 

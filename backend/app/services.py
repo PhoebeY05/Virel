@@ -82,8 +82,6 @@ def _platform_username(project_name: str, platform: str) -> str:
     slug = _slugify_handle(project_name)
     if platform == "reddit":
         return f"u/{slug}"
-    if platform == "hacker_news":
-        return slug
     return f"@{slug}"
 
 
@@ -207,6 +205,8 @@ def update_project(session: Session, project_id: str, user_id: str, payload: Pro
 
 def delete_project(session: Session, project_id: str, user_id: str) -> None:
     project = ensure_owned_project(session, project_id, user_id)
+    for account in list(project.platform_accounts):
+        session.delete(account)
     session.delete(project)
     session.flush()
 
@@ -302,11 +302,12 @@ def create_campaign_from_request(
         tone=payload.tone,
         platforms=selected_platforms,
         launch_signature=launch_signature,
-        status="draft",
+        status="live",
     )
     session.add(campaign)
     session.flush()
 
+    first_generated_post: GeneratedPost | None = None
     for day_plan in plan.days:
         day = CampaignDay(
             campaign_id=campaign.id,
@@ -332,6 +333,12 @@ def create_campaign_from_request(
                 status="scheduled",
             )
             session.add(post)
+            if first_generated_post is None:
+                first_generated_post = post
+
+    if first_generated_post is not None:
+        first_generated_post.status = "published"
+        first_generated_post.scheduled_at = datetime.now(timezone.utc)
 
     session.flush()
     session.expire(campaign, ["days"])
