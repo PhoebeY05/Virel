@@ -31,8 +31,8 @@ PlatformName = Literal[
     "reddit",
     "linkedin",
     "tiktok",
+    "telegram",
     "xiaohongshu",
-    "producthunt",
 ]
 
 
@@ -45,6 +45,28 @@ class AutomationSmokeRequest(BaseModel):
     displayName: str = Field(default="Virel Test Project", alias="displayName")
     bio: str | None = "Testing Virel's guided setup assistant."
     holdMs: int = 300_000
+
+
+def resolve_automation_dir() -> Path | None:
+    override = os.environ.get("VIREL_AUTOMATION_DIR")
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if candidate.exists():
+            return candidate
+
+    route_path = Path(__file__).resolve()
+    for parent in route_path.parents:
+        candidate = parent / "automation"
+        if candidate.exists():
+            return candidate
+
+    cwd = Path.cwd().resolve()
+    for parent in [cwd, *cwd.parents]:
+        candidate = parent / "automation"
+        if candidate.exists():
+            return candidate
+
+    return None
 
 
 @router.post("/automation/sessions", response_model=AutomationSessionRead, status_code=201)
@@ -99,11 +121,12 @@ def patch_automation(
 
 @router.post("/automation/test-setup")
 def start_automation_smoke_test(payload: AutomationSmokeRequest) -> dict[str, int | str]:
-    repo_root = Path(__file__).resolve().parents[4]
-    automation_dir = repo_root / "automation"
-
-    if not automation_dir.exists():
-        raise HTTPException(status_code=500, detail="Automation directory was not found.")
+    automation_dir = resolve_automation_dir()
+    if automation_dir is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Automation directory was not found. Set VIREL_AUTOMATION_DIR to the local automation folder if the backend is running elsewhere.",
+        )
 
     command = [
         "npm.cmd" if os.name == "nt" else "npm",
@@ -116,6 +139,14 @@ def start_automation_smoke_test(payload: AutomationSmokeRequest) -> dict[str, in
     env = os.environ.copy()
     env.setdefault("HEADLESS", "false")
     env.setdefault("SLOW_MO_MS", "150")
+
+    if os.name != "nt" and not env.get("DISPLAY"):
+        command = [
+            "xvfb-run",
+            "-a",
+            "--server-args=-screen 0 1280x900x24",
+            *command,
+        ]
 
     logs_dir = automation_dir / "logs"
     logs_dir.mkdir(exist_ok=True)
@@ -143,4 +174,3 @@ def start_automation_smoke_test(payload: AutomationSmokeRequest) -> dict[str, in
         "logPath": str(log_path),
         "message": "A headed browser should open shortly. Complete verification manually if the platform asks.",
     }
-

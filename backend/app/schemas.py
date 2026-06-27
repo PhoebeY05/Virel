@@ -19,6 +19,65 @@ class UserRead(APIModel):
     auth_provider: str
 
 
+class UserSettingsBase(BaseModel):
+    company_name: str = ""
+    legal_entity_name: str = ""
+    company_start_date: str = ""
+    website_url: str = ""
+    support_email: str = ""
+    phone_number: str = ""
+    country: str = ""
+    timezone: str = ""
+    display_name: str = ""
+    brand_handle: str = ""
+    brand_bio: str = ""
+    profile_image_url: str | None = None
+    backup_email: str = ""
+    google_account_email: str = ""
+    google_link_status: str = "Not linked"
+    linkedin_url: str = ""
+    instagram_handle: str = ""
+    x_handle: str = ""
+    tiktok_handle: str = ""
+    reddit_username: str = ""
+    email_notifications: bool = True
+    default_tone: str = "Confident"
+    theme_mode: str = "System"
+
+
+class UserSettingsUpdate(BaseModel):
+    company_name: str | None = None
+    legal_entity_name: str | None = None
+    company_start_date: str | None = None
+    website_url: str | None = None
+    support_email: str | None = None
+    phone_number: str | None = None
+    country: str | None = None
+    timezone: str | None = None
+    display_name: str | None = None
+    brand_handle: str | None = None
+    brand_bio: str | None = None
+    profile_image_url: str | None = None
+    backup_email: str | None = None
+    google_account_email: str | None = None
+    google_link_status: str | None = None
+    linkedin_url: str | None = None
+    instagram_handle: str | None = None
+    x_handle: str | None = None
+    tiktok_handle: str | None = None
+    reddit_username: str | None = None
+    email_notifications: bool | None = None
+    default_tone: str | None = None
+    theme_mode: str | None = None
+
+
+class UserSettingsRead(UserSettingsBase, APIModel):
+    id: str
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ProjectBase(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""

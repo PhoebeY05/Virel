@@ -55,21 +55,26 @@ Request:
 
 ## `GET /campaigns`
 
-Returns campaign metadata, seven campaign days, and generated posts.
+Returns campaign metadata, three campaign phases, and generated posts.
 
 ## `GET /analytics`
 
-Returns:
+Returns persisted analytics only. If no snapshots have been recorded yet, the metrics stay empty:
 
 ```json
 {
-  "likes": 1234,
-  "comments": 87,
-  "shares": 52,
-  "ctr": 0.041,
-  "clicks": 310,
-  "best_platform": "instagram",
-  "engagement_timeline": []
+  "likes": 0,
+  "comments": 0,
+  "shares": 0,
+  "ctr": 0,
+  "clicks": 0,
+  "engagement": 0,
+  "best_platform": "n/a",
+  "active_campaigns": 0,
+  "total_projects": 0,
+  "engagement_timeline": [],
+  "platforms": [],
+  "top_posts": []
 }
 ```
 

@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -29,6 +29,24 @@ def init_db(engine: Engine) -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    if engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(engine)
+    if "campaigns" not in inspector.get_table_names():
+        return
+
+    campaign_columns = {column["name"] for column in inspector.get_columns("campaigns")}
+    if "launch_signature" in campaign_columns:
+        return
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE campaigns ADD COLUMN launch_signature VARCHAR(64) NOT NULL DEFAULT ''"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_campaigns_launch_signature ON campaigns (launch_signature)"
+        )
 
 
 def get_db(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
@@ -41,4 +59,3 @@ def get_db(session_factory: sessionmaker[Session]) -> Generator[Session, None, N
         raise
     finally:
         session.close()
-

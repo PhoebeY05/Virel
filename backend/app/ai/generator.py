@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -52,11 +51,23 @@ class ReplyPlan(BaseModel):
     reply_text: str
 
 
-def _strip_json_block(text: str) -> str:
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    if fenced:
-        return fenced.group(1).strip()
-    return text.strip()
+CAMPAIGN_PHASES: list[tuple[str, str, str]] = [
+    (
+        "Pre-Launch",
+        "Build curiosity, show the pain point, and collect early interest before launch.",
+        "Teaser posts, problem awareness, founder story, behind-the-scenes updates, waitlist posts, and community questions.",
+    ),
+    (
+        "Launch",
+        "Announce the product, explain the solution, and push for visits, signups, or feedback.",
+        "Official announcement, founder story, problem-solution framing, product demo, feature highlights, and a strong CTA.",
+    ),
+    (
+        "Growth Loop",
+        "Keep momentum going with updates, tutorials, comparisons, and re-engagement content.",
+        "Product updates, user feedback, FAQs, tutorials, alternative comparisons, and new campaign angles.",
+    ),
+]
 
 
 def _platform_style(platform: str) -> str:
@@ -85,18 +96,10 @@ def _fallback_campaign_plan(
     tone: str,
 ) -> CampaignPlan:
     now = datetime.now(timezone.utc)
-    themes = [
-        ("Big reveal", "Introduce the project and make the promise clear."),
-        ("Problem framing", "Show the pain point the project solves."),
-        ("How it works", "Explain the product in a simple, credible way."),
-        ("Social proof", "Add early traction, team context, or proof points."),
-        ("Behind the scenes", "Humanise the team and process."),
-        ("Launch push", "Ask for visits, feedback, signups, or shares."),
-        ("Follow-up", "Reinforce value and create a final nudge."),
-    ]
+    phase_offsets = [0, 3, 10]
     days: list[CampaignDayPlan] = []
     selected_platforms = platforms or platform_names()
-    for index, (theme, objective) in enumerate(themes, start=1):
+    for index, ((theme, objective, angles), day_offset) in enumerate(zip(CAMPAIGN_PHASES, phase_offsets, strict=True), start=1):
         posts: list[CampaignPostPlan] = []
         for platform_index, platform in enumerate(selected_platforms):
             style = _platform_style(platform)
@@ -104,10 +107,11 @@ def _fallback_campaign_plan(
             content = (
                 f"{project_name} is built for {audience}. "
                 f"Today we focus on {theme.lower()} by showing how it helps with {goal}. "
+                f"Phase focus: {angles} "
                 f"Tone: {tone}. Platform style: {style}. "
                 f"Context: {description}"
             )
-            scheduled_at = now + timedelta(days=index - 1, hours=platform_index * 2)
+            scheduled_at = now + timedelta(days=day_offset, hours=platform_index * 2)
             posts.append(
                 CampaignPostPlan(
                     platform=platform,
@@ -121,7 +125,7 @@ def _fallback_campaign_plan(
         days.append(CampaignDayPlan(day_number=index, theme=theme, objective=objective, posts=posts))
     return CampaignPlan(
         title=f"{project_name} launch campaign",
-        summary=f"A 7-day launch plan to reach {audience} and drive {goal}.",
+        summary=f"A three-phase launch plan to reach {audience} and drive {goal}.",
         tone=tone,
         days=days,
     )
@@ -143,14 +147,19 @@ def generate_campaign_plan(
             from openai import OpenAI
 
             client = OpenAI(api_key=openai_api_key)
-            response = client.responses.create(
+            response = client.responses.parse(
                 model=model,
-                input=prompt,
+                input=[
+                    {
+                        "role": "system",
+                        "content": "Generate a campaign plan that matches the requested JSON schema exactly.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                text_format=CampaignPlan,
             )
-            raw_text = getattr(response, "output_text", "") or ""
-            payload_text = _strip_json_block(raw_text)
-            plan = CampaignPlan.model_validate(json.loads(payload_text))
-            if len(plan.days) != 7:
+            plan = getattr(response, "output_parsed", None)
+            if plan is None or len(plan.days) != 3:
                 return _fallback_campaign_plan(project_name, description, audience, goal, platforms, tone)
             validate_plan(plan)
             return plan
@@ -174,10 +183,20 @@ def generate_reply(
             from openai import OpenAI
 
             client = OpenAI(api_key=openai_api_key)
-            response = client.responses.create(model=model, input=prompt)
-            raw_text = getattr(response, "output_text", "") or ""
-            payload_text = _strip_json_block(raw_text)
-            return ReplyPlan.model_validate(json.loads(payload_text))
+            response = client.responses.parse(
+                model=model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": "Generate a concise reply that matches the requested JSON schema exactly.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                text_format=ReplyPlan,
+            )
+            parsed = getattr(response, "output_parsed", None)
+            if parsed is not None:
+                return parsed
         except Exception:
             pass
 
@@ -190,7 +209,7 @@ def generate_reply(
             "Appreciate the honest take. We built this for student projects, so feedback like this helps a lot. "
             "Happy to share more details if useful."
         )
-    elif platform in {"linkedin", "product_hunt"}:
+    elif platform == "linkedin":
         reply_text = (
             "Thanks for taking a look. We're using this feedback to refine the launch experience and make the product more useful."
         )
@@ -198,13 +217,16 @@ def generate_reply(
 
 
 def validate_plan(plan: CampaignPlan) -> CampaignPlan:
-    if len(plan.days) != 7:
-        raise PromptValidationError("Campaign plans must contain exactly seven days")
+    if len(plan.days) != 3:
+        raise PromptValidationError("Campaign plans must contain exactly three phases")
     if not plan.days:
         raise PromptValidationError("Campaign plans cannot be empty")
+    day_numbers = sorted(day.day_number for day in plan.days)
+    if day_numbers != [1, 2, 3]:
+        raise PromptValidationError("Campaign day numbers must be exactly 1, 2, and 3")
     for day in plan.days:
-        if day.day_number < 1 or day.day_number > 7:
-            raise PromptValidationError("Campaign day numbers must be between 1 and 7")
+        if not day.posts:
+            raise PromptValidationError("Campaign phases must include at least one post")
         for post in day.posts:
             if post.platform not in platform_names():
                 raise PromptValidationError(f"Unsupported platform: {post.platform}")

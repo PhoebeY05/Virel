@@ -94,3 +94,67 @@ It is a launch infrastructure tool for student projects, combining:
 ## Key Insight
 
 Virel removes the friction of launching a project online by acting as a setup + marketing layer, while keeping users fully in control of account creation and complying with platform verification requirements.
+
+## Campaign Timeline
+1. Pre-Launch Phase
+
+Purpose: Build curiosity before the product is released.
+
+This phase is about preparing the audience.
+
+Content can include:
+
+Content Type Purpose
+Teaser posts Build interest
+Problem awareness posts Show why the product is needed
+Founder story Make the startup feel human
+Behind-the-scenes Show progress
+Waitlist posts Collect early interest
+Community questions Understand what users care about
+
+Example:
+
+“We’re building a tool to help students manage group projects better. What’s the worst part of group work for you?”
+
+This phase should not be too salesy. It should make people aware of the problem.
+
+2. Launch Phase
+
+Purpose: Announce the product and get people to take action.
+
+This can still be your 7-day launch sprint.
+
+Day Focus
+Day 1 Official announcement
+Day 2 Founder story
+Day 3 Problem-solution post
+Day 4 Product demo
+Day 5 Feature highlight
+Day 6 Community feedback / testimonial
+Day 7 Strong call-to-action
+
+This is where the campaign is most intense.
+
+The goal is to get:
+
+signups, beta users, product visits, feedback, or purchases.
+
+3. Growth Loop Phase
+
+Purpose: Keep promoting the product after launch.
+
+This is better than calling it “post-launch” because it shows that the campaign continues.
+
+The Growth Loop can repeat every week or month.
+
+Weekly Activity Purpose
+Share product updates Show that the product is improving
+Repurpose successful posts Reuse what worked
+Share user feedback Build trust
+Answer FAQs Reduce doubts
+Post tutorials Teach people how to use the product
+Compare with alternatives Show why the product is useful
+Run new campaign angles Test different styles
+Re-engage users Bring people back
+
+This phase is basically constant promotion, but smarter.

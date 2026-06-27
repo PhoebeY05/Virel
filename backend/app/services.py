@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+import re
 from statistics import mean
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.generator import generate_campaign_plan, generate_reply, validate_plan
@@ -23,12 +26,12 @@ from app.models import (
     Project,
     SuggestedReply,
     User,
+    UserSettings,
 )
 from app.platforms import SUPPORTED_PLATFORM_MAP, SUPPORTED_PLATFORMS, platform_names
 from app.schemas import (
     AnalyticsDetail,
     AnalyticsPoint,
-    AnalyticsSummary,
     AutomationConnectRequest,
     AutomationSessionCreate,
     AutomationSessionUpdate,
@@ -48,6 +51,8 @@ from app.schemas import (
     ProjectUpdate,
     ReplySuggestionRead,
     TopPostStatsRead,
+    UserSettingsRead,
+    UserSettingsUpdate,
 )
 
 
@@ -66,6 +71,68 @@ def ensure_user(session: Session, current_user: CurrentUser) -> User:
         session.add(user)
     session.flush()
     return user
+
+
+def _slugify_handle(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return slug or "virel"
+
+
+def _platform_username(project_name: str, platform: str) -> str:
+    slug = _slugify_handle(project_name)
+    if platform == "reddit":
+        return f"u/{slug}"
+    if platform == "hacker_news":
+        return slug
+    return f"@{slug}"
+
+
+def _default_user_settings(user: User) -> dict[str, object]:
+    slug = _slugify_handle(user.name)
+    branded_handle = f"@{slug}"
+    return {
+        "company_name": user.name,
+        "legal_entity_name": user.name,
+        "company_start_date": "",
+        "website_url": "",
+        "support_email": user.email,
+        "phone_number": "",
+        "country": "",
+        "timezone": "",
+        "display_name": user.name,
+        "brand_handle": branded_handle,
+        "brand_bio": "",
+        "profile_image_url": None,
+        "backup_email": user.email,
+        "google_account_email": user.email,
+        "google_link_status": "Not linked",
+        "linkedin_url": "",
+        "instagram_handle": branded_handle,
+        "x_handle": branded_handle,
+        "tiktok_handle": branded_handle,
+        "reddit_username": f"u/{slug}",
+        "email_notifications": True,
+        "default_tone": "Confident",
+        "theme_mode": "System",
+    }
+
+
+def ensure_user_settings(session: Session, user: User) -> UserSettings:
+    settings = session.scalar(select(UserSettings).where(UserSettings.user_id == user.id))
+    if settings:
+        return settings
+    settings = UserSettings(user_id=user.id, **_default_user_settings(user))
+    session.add(settings)
+    session.flush()
+    return settings
+
+
+def update_user_settings(session: Session, user: User, payload: UserSettingsUpdate) -> UserSettings:
+    settings = ensure_user_settings(session, user)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(settings, key, value)
+    session.flush()
+    return settings
 
 
 def ensure_owned_project(session: Session, project_id: str, user_id: str) -> Project:
@@ -166,6 +233,29 @@ def campaign_to_detail(campaign: Campaign) -> CampaignDetail:
     return CampaignDetail.model_validate(data)
 
 
+def _campaign_launch_signature(project_id: str, plan: Any) -> str:
+    plan_data = plan.model_dump(mode="json")
+    normalized_days: list[dict[str, object]] = []
+    for day in plan_data.get("days", []):
+        normalized_day = dict(day)
+        normalized_posts = []
+        for post in normalized_day.get("posts", []):
+            normalized_post = dict(post)
+            normalized_post.pop("scheduled_at", None)
+            normalized_posts.append(normalized_post)
+        normalized_day["posts"] = normalized_posts
+        normalized_days.append(normalized_day)
+    payload = {
+        "project_id": project_id,
+        "title": plan_data.get("title", ""),
+        "summary": plan_data.get("summary", ""),
+        "tone": plan_data.get("tone", ""),
+        "days": normalized_days,
+    }
+    signature_source = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return sha256(signature_source.encode("utf-8")).hexdigest()
+
+
 def create_campaign_from_request(
     session: Session,
     settings: Settings,
@@ -193,6 +283,16 @@ def create_campaign_from_request(
         model=settings.openai_model,
     )
     validate_plan(plan)
+    launch_signature = _campaign_launch_signature(project.id, plan)
+    duplicate_campaign = session.scalar(
+        select(Campaign.id).where(Campaign.project_id == project.id, Campaign.launch_signature == launch_signature)
+    )
+    if duplicate_campaign:
+        raise AppError(
+            "An identical campaign has already been launched for this project.",
+            "CAMPAIGN_DUPLICATE",
+            409,
+        )
 
     campaign = Campaign(
         project_id=project.id,
@@ -201,6 +301,7 @@ def create_campaign_from_request(
         goal=payload.goal,
         tone=payload.tone,
         platforms=selected_platforms,
+        launch_signature=launch_signature,
         status="draft",
     )
     session.add(campaign)
@@ -367,14 +468,51 @@ def connect_automation(
     user_id: str,
     payload: AutomationConnectRequest,
 ) -> AutomationSession:
-    ensure_owned_project(session, payload.project_id, user_id)
+    project = ensure_owned_project(session, payload.project_id, user_id)
+    user = session.scalar(select(User).where(User.id == user_id))
+    if not user:
+        raise AppError("User not found", "USER_NOT_FOUND", 404)
+    user_settings = ensure_user_settings(session, user)
+    merged_payload = dict(payload.payload)
+    defaults = {
+        "username": _platform_username(project.name, payload.platform),
+        "display_name": user_settings.display_name or project.name,
+        "bio": user_settings.brand_bio or project.description,
+        "profile_image_url": user_settings.profile_image_url or project.logo_url,
+        "account_url": user_settings.website_url or project.demo_url,
+        "company_name": user_settings.company_name or project.name,
+        "legal_entity_name": user_settings.legal_entity_name or project.name,
+        "company_start_date": user_settings.company_start_date,
+        "website_url": user_settings.website_url or project.demo_url,
+        "support_email": user_settings.support_email,
+        "phone_number": user_settings.phone_number,
+        "country": user_settings.country,
+        "timezone": user_settings.timezone,
+        "backup_email": user_settings.backup_email,
+        "google_account_email": user_settings.google_account_email,
+        "google_link_status": user_settings.google_link_status,
+        "brand_handle": user_settings.brand_handle,
+        "brand_bio": user_settings.brand_bio or project.description,
+        "linkedin_url": user_settings.linkedin_url,
+        "instagram_handle": user_settings.instagram_handle,
+        "x_handle": user_settings.x_handle,
+        "tiktok_handle": user_settings.tiktok_handle,
+        "reddit_username": user_settings.reddit_username,
+        "project_name": project.name,
+        "project_description": project.description,
+        "project_goal": project.goal,
+        "project_target_audience": project.target_audience,
+    }
+    for key, value in defaults.items():
+        if key not in merged_payload or merged_payload[key] in (None, ""):
+            merged_payload[key] = value
     automation = AutomationSession(
         project_id=payload.project_id,
         platform=payload.platform,
         status=payload.status,
         step=payload.step,
         progress=payload.progress,
-        payload=payload.payload,
+        payload=merged_payload,
     )
     session.add(automation)
     session.flush()
@@ -467,64 +605,59 @@ def send_reply(
     return suggestion
 
 
-def _score_seed(*parts: str) -> int:
-    digest = sha256("::".join(parts).encode("utf-8")).hexdigest()
-    return int(digest[:12], 16)
+def _list_user_analytics_snapshots(session: Session, user_id: str) -> list[AnalyticsSnapshot]:
+    project_ids = list(session.scalars(select(Project.id).where(Project.user_id == user_id)))
+    campaign_ids = list(
+        session.scalars(select(Campaign.id).join(Campaign.project).where(Project.user_id == user_id))
+    )
 
+    filters = []
+    if project_ids:
+        filters.append(AnalyticsSnapshot.project_id.in_(project_ids))
+    if campaign_ids:
+        filters.append(AnalyticsSnapshot.campaign_id.in_(campaign_ids))
 
-def _mock_platform_metrics(seed: int, scale: int = 1) -> dict[str, int | float]:
-    likes = 30 + seed % 170 + scale * 3
-    comments = 4 + (seed // 7) % 35
-    shares = 2 + (seed // 11) % 20
-    clicks = 12 + (seed // 13) % 120
-    ctr = round(min(0.2, 0.015 + (seed % 25) / 2000), 4)
-    return {"likes": likes, "comments": comments, "shares": shares, "clicks": clicks, "ctr": ctr}
+    if not filters:
+        return []
 
-
-def _timeline_for_seed(seed: int) -> list[AnalyticsPoint]:
-    points: list[AnalyticsPoint] = []
-    base = datetime.now(timezone.utc)
-    for offset in range(7):
-        daily_seed = seed + offset * 31
-        metrics = _mock_platform_metrics(daily_seed)
-        points.append(
-            AnalyticsPoint(
-                date=base.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=offset),
-                likes=int(metrics["likes"]),
-                comments=int(metrics["comments"]),
-                shares=int(metrics["shares"]),
-                ctr=float(metrics["ctr"]),
-                clicks=int(metrics["clicks"]),
-            )
+    return list(
+        session.scalars(
+            select(AnalyticsSnapshot).where(or_(*filters)).order_by(AnalyticsSnapshot.snapshot_date.asc())
         )
-    return points
+    )
 
 
-def _aggregate_platform_summary(
-    items: list[tuple[GeneratedPost, int]],
+def _aggregate_snapshot_summary(
+    snapshots: list[AnalyticsSnapshot],
 ) -> tuple[str, list[AnalyticsPoint], list[PlatformStatsRead], list[TopPostStatsRead]]:
-    if not items:
+    if not snapshots:
         return "n/a", [], [], []
 
     platform_metrics: dict[str, dict[str, float | int]] = defaultdict(
         lambda: {"likes": 0, "comments": 0, "shares": 0, "clicks": 0, "ctr_total": 0.0, "posts": 0}
     )
-    top_post_entries: list[tuple[int, int, GeneratedPost, dict[str, int | float]]] = []
 
-    for post, seed in items:
-        metrics = _mock_platform_metrics(seed)
-        platform_entry = platform_metrics[post.platform]
-        platform_entry["likes"] = int(platform_entry["likes"]) + int(metrics["likes"])
-        platform_entry["comments"] = int(platform_entry["comments"]) + int(metrics["comments"])
-        platform_entry["shares"] = int(platform_entry["shares"]) + int(metrics["shares"])
-        platform_entry["clicks"] = int(platform_entry["clicks"]) + int(metrics["clicks"])
-        platform_entry["ctr_total"] = float(platform_entry["ctr_total"]) + float(metrics["ctr"])
+    for snapshot in snapshots:
+        platform_entry = platform_metrics[snapshot.platform]
+        platform_entry["likes"] = int(platform_entry["likes"]) + int(snapshot.likes)
+        platform_entry["comments"] = int(platform_entry["comments"]) + int(snapshot.comments)
+        platform_entry["shares"] = int(platform_entry["shares"]) + int(snapshot.shares)
+        platform_entry["clicks"] = int(platform_entry["clicks"]) + int(snapshot.clicks)
+        platform_entry["ctr_total"] = float(platform_entry["ctr_total"]) + float(snapshot.ctr)
         platform_entry["posts"] = int(platform_entry["posts"]) + 1
-        engagement = int(metrics["likes"]) + int(metrics["comments"]) + int(metrics["shares"]) + int(metrics["clicks"])
-        top_post_entries.append((engagement, int(metrics["clicks"]), post, metrics))
 
     best_platform = max(platform_metrics.items(), key=lambda pair: int(pair[1]["likes"]) + int(pair[1]["clicks"]))[0]
-    timeline_seed = sum(seed for _, seed in items) or 1
+    timeline = [
+        AnalyticsPoint(
+            date=snapshot.snapshot_date,
+            likes=snapshot.likes,
+            comments=snapshot.comments,
+            shares=snapshot.shares,
+            ctr=snapshot.ctr,
+            clicks=snapshot.clicks,
+        )
+        for snapshot in snapshots[-7:]
+    ]
     platform_stats = [
         PlatformStatsRead(
             platform=platform,
@@ -539,24 +672,7 @@ def _aggregate_platform_summary(
         for platform, metrics in platform_metrics.items()
     ]
     platform_stats.sort(key=lambda item: (item.engagement, item.clicks), reverse=True)
-
-    top_posts = [
-        TopPostStatsRead(
-            id=post.id,
-            platform=post.platform,
-            title=post.title,
-            likes=int(metrics["likes"]),
-            comments=int(metrics["comments"]),
-            shares=int(metrics["shares"]),
-            clicks=int(metrics["clicks"]),
-            ctr=float(metrics["ctr"]),
-            engagement=engagement,
-            scheduled_at=post.scheduled_at,
-        )
-        for engagement, _clicks, post, metrics in sorted(top_post_entries, key=lambda entry: (entry[0], entry[1]), reverse=True)[:5]
-    ]
-
-    return best_platform, _timeline_for_seed(timeline_seed), platform_stats, top_posts
+    return best_platform, timeline, platform_stats, []
 
 
 def _count_active_campaigns(campaigns: list[Campaign]) -> int:
@@ -569,9 +685,9 @@ def _build_summary(
     campaign_id: str | None,
     total_projects: int,
     active_campaigns: int,
-    items: list[tuple[GeneratedPost, int]],
+    snapshots: list[AnalyticsSnapshot],
 ) -> AnalyticsDetail:
-    best_platform, timeline, platform_stats, top_posts = _aggregate_platform_summary(items)
+    best_platform, timeline, platform_stats, top_posts = _aggregate_snapshot_summary(snapshots)
     likes = sum(item.likes for item in platform_stats)
     comments = sum(item.comments for item in platform_stats)
     shares = sum(item.shares for item in platform_stats)
@@ -598,17 +714,19 @@ def _build_summary(
 
 def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
     campaign = ensure_campaign(session, campaign_id, user_id)
-    platform_items = [
-        (post, _score_seed(campaign.id, post.id, post.platform))
-        for day in campaign.days
-        for post in day.posts
-    ]
+    snapshots = list(
+        session.scalars(
+            select(AnalyticsSnapshot)
+            .where(AnalyticsSnapshot.campaign_id == campaign.id)
+            .order_by(AnalyticsSnapshot.snapshot_date.asc())
+        )
+    )
     return _build_summary(
         project_id=campaign.project_id,
         campaign_id=campaign.id,
         total_projects=1,
         active_campaigns=1 if campaign.status.lower() != "complete" else 0,
-        items=platform_items,
+        snapshots=snapshots,
     )
 
 
@@ -621,17 +739,19 @@ def summarize_project(session: Session, project_id: str, user_id: str) -> Analyt
             .options(selectinload(Campaign.days).selectinload(CampaignDay.posts))
         )
     )
-    platform_items: list[tuple[GeneratedPost, int]] = []
-    for campaign in campaigns:
-        for day in campaign.days:
-            for post in day.posts:
-                platform_items.append((post, _score_seed(project.id, campaign.id, post.id, post.platform)))
+    snapshots = list(
+        session.scalars(
+            select(AnalyticsSnapshot)
+            .where(AnalyticsSnapshot.project_id == project.id)
+            .order_by(AnalyticsSnapshot.snapshot_date.asc())
+        )
+    )
     return _build_summary(
         project_id=project.id,
         campaign_id=None,
         total_projects=1,
         active_campaigns=_count_active_campaigns(campaigns),
-        items=platform_items,
+        snapshots=snapshots,
     )
 
 
@@ -645,17 +765,13 @@ def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
             .where(Project.user_id == user_id)
         )
     )
-    platform_items: list[tuple[GeneratedPost, int]] = []
-    for campaign in campaigns:
-        for day in campaign.days:
-            for post in day.posts:
-                platform_items.append((post, _score_seed(campaign.id, post.id, post.platform)))
+    snapshots = _list_user_analytics_snapshots(session, user_id)
     return _build_summary(
         project_id=None,
         campaign_id=None,
         total_projects=len(projects),
         active_campaigns=_count_active_campaigns(campaigns),
-        items=platform_items,
+        snapshots=snapshots,
     )
 
 

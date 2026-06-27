@@ -5,6 +5,7 @@ from app.api.routes.automation import router as automation_router
 from app.api.routes.campaigns import router as campaigns_router
 from app.api.routes.comments import router as comments_router
 from app.api.routes.health import router as health_router
+from app.api.routes.settings import router as settings_router
 from app.api.routes.platforms import router as platforms_router
 from app.api.routes.projects import router as projects_router
 
@@ -14,6 +15,7 @@ __all__ = [
     "campaigns_router",
     "comments_router",
     "health_router",
+    "settings_router",
     "platforms_router",
     "projects_router",
 ]

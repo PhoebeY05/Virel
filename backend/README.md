@@ -5,7 +5,7 @@ FastAPI backend for the Virel launch infrastructure MVP.
 ## What is included
 
 - Project CRUD
-- Campaign generation for 7-day launch plans
+- Campaign generation for three-phase launch plans
 - Generated post editing and regeneration
 - Platform account management
 - Automation session coordination endpoints

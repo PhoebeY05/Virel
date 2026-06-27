@@ -80,15 +80,6 @@ SUPPORTED_PLATFORMS: list[PlatformInfo] = [
         notes="Regional verification limits automation.",
     ),
     PlatformInfo(
-        name="Product Hunt",
-        slug="product_hunt",
-        writing_style="Launch-focused, concise, and benefit-led.",
-        requires_human_verification=False,
-        phone_required="rare",
-        automation_level="assisted",
-        notes="Useful for launch-day messaging and product framing.",
-    ),
-    PlatformInfo(
         name="Hacker News",
         slug="hacker_news",
         writing_style="Technical, honest, and discussion-friendly.",
@@ -98,13 +89,13 @@ SUPPORTED_PLATFORMS: list[PlatformInfo] = [
         notes="Prioritise transparency and signal over promotion.",
     ),
     PlatformInfo(
-        name="Discord",
-        slug="discord",
-        writing_style="Friendly, conversational, and community-building.",
+        name="Telegram",
+        slug="telegram",
+        writing_style="Direct, fast-moving, and community-driven.",
         requires_human_verification=False,
         phone_required="rare",
         automation_level="assisted",
-        notes="Useful for community ops and private launch coordination.",
+        notes="Useful for announcements, communities, and launch updates.",
     ),
 ]
 
@@ -114,4 +105,3 @@ SUPPORTED_PLATFORM_MAP = {platform.slug: platform for platform in SUPPORTED_PLAT
 
 def platform_names() -> list[str]:
     return [platform.slug for platform in SUPPORTED_PLATFORMS]
-

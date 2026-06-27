@@ -10,7 +10,9 @@ services:
       - "5433:5432"
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     depends_on:
       - postgres
     environment:
@@ -19,6 +21,7 @@ services:
       FRONTEND_URL: http://localhost:3000
       AUTH_ENABLED: "false"
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      VIREL_AUTOMATION_DIR: /app/automation
     ports:
       - "8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000

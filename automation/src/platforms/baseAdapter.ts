@@ -54,17 +54,20 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     await this.ensureInitialized();
     await this.page.goto(this.definition.signupUrl, { waitUntil: "domcontentloaded" });
 
-    if (!this.definition.supportsAutomatedSignup) {
-      await this.pauseForUser("This platform requires guided manual signup. Complete the visible signup flow.");
-      await this.saveSession();
-      return;
-    }
-
     if (this.setup.signupMethod === "google") {
       await this.startGoogleSignup();
       await this.pauseForUser("Complete Google sign-in, then finish any platform verification or username steps.");
     } else {
       await this.fillSignupFields();
+
+      if (!this.definition.supportsAutomatedSignup) {
+        await this.pauseForUser(
+          "This platform needs guided manual signup. We pre-filled what we could, so complete the visible flow and any verification."
+        );
+        await this.saveSession();
+        return;
+      }
+
       await this.pauseForUser("Review the signup details, submit them, and complete any verification.");
     }
     await this.saveSession();

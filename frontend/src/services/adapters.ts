@@ -6,6 +6,8 @@ import type {
   GeneratedPost,
   Platform,
   PlatformName,
+  PlatformAccount,
+  PlatformAccountStatus,
   PostStatus,
   Project,
   ProjectStatus,
@@ -133,6 +135,21 @@ export interface ApiAutomationSession {
   updated_at: string
 }
 
+export interface ApiPlatformAccount {
+  id: string
+  project_id: string
+  platform: string
+  username: string
+  bio: string
+  profile_image_url?: string | null
+  account_url?: string | null
+  status: string
+  notes: string
+  phone_required: boolean
+  created_at: string
+  updated_at: string
+}
+
 const slugToName: Record<string, PlatformName> = {
   instagram: 'Instagram',
   reddit: 'Reddit',
@@ -140,8 +157,7 @@ const slugToName: Record<string, PlatformName> = {
   tiktok: 'TikTok',
   x: 'X',
   facebook: 'Facebook',
-  discord: 'Discord',
-  product_hunt: 'Product Hunt',
+  telegram: 'Telegram',
   hacker_news: 'Hacker News',
 }
 
@@ -336,6 +352,23 @@ export function fromApiAutomationSession(session: ApiAutomationSession): Automat
   }
 }
 
+export function fromApiPlatformAccount(account: ApiPlatformAccount): PlatformAccount {
+  return {
+    id: account.id,
+    projectId: account.project_id,
+    platform: toPlatformName(account.platform),
+    username: account.username,
+    bio: account.bio,
+    profileImageUrl: account.profile_image_url ?? null,
+    accountUrl: account.account_url ?? null,
+    status: toPlatformAccountStatus(account.status),
+    notes: account.notes,
+    phoneRequired: account.phone_required,
+    createdAt: account.created_at,
+    updatedAt: account.updated_at,
+  }
+}
+
 function toApiProjectStatus(status?: ProjectStatus): string | undefined {
   return status?.toLowerCase()
 }
@@ -387,7 +420,16 @@ function toPercent(value: number) {
 
 function defaultUsername(platform: PlatformName) {
   if (platform === 'Reddit') return 'u/VirelHQ'
-  if (platform === 'Discord') return 'Virel Community'
   if (platform === 'LinkedIn') return 'Virel'
   return '@virel'
+}
+
+function toPlatformAccountStatus(value: string): PlatformAccountStatus {
+  const normalized = value.toLowerCase()
+  if (normalized === 'connected') return 'Connected'
+  if (normalized === 'needs_verification') return 'Needs verification'
+  if (normalized === 'paused') return 'Paused'
+  if (normalized === 'error') return 'Error'
+  if (normalized === 'planned') return 'Planned'
+  return 'Pending'
 }

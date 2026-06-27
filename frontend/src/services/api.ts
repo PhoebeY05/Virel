@@ -13,7 +13,14 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   if (!response.ok) {
     const message = await response.text()
-    throw new Error(message || `API request failed: ${response.status}`)
+    let detail = message
+    try {
+      const parsed = JSON.parse(message) as { detail?: string }
+      detail = parsed.detail || detail
+    } catch {
+      // Fall back to the raw body when the backend did not return JSON.
+    }
+    throw new Error(detail || `API request failed: ${response.status}`)
   }
 
   if (response.status === 204) {

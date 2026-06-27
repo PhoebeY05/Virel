@@ -4,7 +4,6 @@ import {
   BadgeCheck,
   BarChart3,
   ChevronRight,
-  CircleDashed,
   ExternalLink,
   FolderKanban,
   Globe2,
@@ -18,25 +17,29 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  UserRoundPlus,
   Upload,
   WandSparkles,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
-import { connectAutomation, createAutomationSession, getAutomationSessions, getPlatforms } from './services/automation'
+import { connectAutomation, getAutomationSessions, getPlatforms } from './services/automation'
+import { createProjectAccount, getProjectAccounts } from './services/accounts'
 import { generateCampaign, getCampaigns, type GenerateCampaignInput } from './services/campaigns'
 import { uploadImage } from './services/media'
 import { createProject, deleteProject, getProjects, updateProject, type ProjectInput } from './services/projects'
+import { getUserSettings, updateUserSettings } from './services/settings'
 import type {
   AutomationSession,
   Campaign,
+  Platform,
   PlatformName,
+  PlatformAccount,
   Project,
   ProjectStatus,
+  UserSettings,
 } from './types'
 
 type View = 'Dashboard' | 'Projects' | 'Campaigns' | 'Analytics' | 'Automation' | 'Settings'
@@ -48,6 +51,11 @@ type NavItem = {
   description: string
   color: string
   icon: LucideIcon
+}
+
+type ProjectFormValues = {
+  project: ProjectInput
+  launchPlatforms: PlatformName[]
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -143,9 +151,6 @@ function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => voi
             <p className="text-[11px] font-black uppercase tracking-[0.35em] text-[#b97fd6]">virel</p>
             <h1 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">Studio</h1>
             <p className="mt-1 text-xs uppercase tracking-[0.28em] text-[#6b625a]">creative workspace</p>
-          </div>
-          <div className="grid h-14 w-14 place-items-center rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff] text-xl font-black text-[#1f1814] shadow-[4px_4px_0_rgba(45,33,26,0.06)]">
-            V
           </div>
         </div>
       </div>
@@ -448,6 +453,7 @@ function ProjectsView() {
   const projectsState = useAsync(getProjects)
   const campaignsState = useAsync(getCampaigns)
   const automationSessionsState = useAsync(getAutomationSessions)
+  const settingsState = useAsync(getUserSettings)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<ProjectStatus | 'All'>('All')
   const [editingProject, setEditingProject] = useState<Project | null>(null)
@@ -457,6 +463,7 @@ function ProjectsView() {
   const projects = projectsState.data ?? []
   const campaigns = campaignsState.data ?? []
   const automationSessions = automationSessionsState.data ?? []
+  const settings = settingsState.data
   const filtered = useMemo(
     () =>
       projects.filter((project) => {
@@ -470,17 +477,31 @@ function ProjectsView() {
   )
   const projectProgress = (project: Project) => calculateLaunchProgress(project, campaigns, automationSessions)
 
-  async function handleSave(input: ProjectInput) {
+  async function handleSave(input: ProjectFormValues) {
     setActionError(null)
     try {
       if (editingProject) {
-        const updated = await updateProject(editingProject.id, input)
+        const updated = await updateProject(editingProject.id, input.project)
         projectsState.setData(projects.map((project) => (project.id === updated.id ? updated : project)))
         setEditingProject(null)
       } else {
-        const created = await createProject(input)
+        const created = await createProject(input.project)
         projectsState.setData([created, ...projects])
         setIsCreating(false)
+        if (settings && input.launchPlatforms.length > 0) {
+          await Promise.all(
+            input.launchPlatforms.map((platform) =>
+              Promise.all([
+                createProjectAccount(created.id, buildPlatformAccountInput(created, settings, platform)),
+                connectAutomation({
+                  projectId: created.id,
+                  platform,
+                  payload: buildGuidedAutomationPayload(created, settings, platform),
+                }),
+              ]),
+            ),
+          )
+        }
       }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Project save failed.')
@@ -497,10 +518,16 @@ function ProjectsView() {
     }
   }
 
-  if (projectsState.isLoading || campaignsState.isLoading || automationSessionsState.isLoading) return <LoadingGrid />
-  const error = projectsState.error || campaignsState.error || automationSessionsState.error
+  if (projectsState.isLoading || campaignsState.isLoading || automationSessionsState.isLoading || settingsState.isLoading) return <LoadingGrid />
+  const error = projectsState.error || campaignsState.error || automationSessionsState.error || settingsState.error
   if (error) {
-    const retry = projectsState.error ? projectsState.retry : campaignsState.error ? campaignsState.retry : automationSessionsState.retry
+    const retry = projectsState.error
+      ? projectsState.retry
+      : campaignsState.error
+        ? campaignsState.retry
+        : automationSessionsState.error
+          ? automationSessionsState.retry
+          : settingsState.retry
     return <ErrorState title="Projects could not load." message={error} retry={retry} />
   }
 
@@ -560,6 +587,7 @@ function ProjectsView() {
       {(isCreating || editingProject) && (
         <ProjectModal
           initial={editingProject ?? undefined}
+          settings={settings}
           onCancel={() => {
             setIsCreating(false)
             setEditingProject(null)
@@ -637,6 +665,123 @@ function ProjectCard({
   )
 }
 
+function calculateLaunchProgress(
+  project: Project,
+  campaigns: Campaign[],
+  automationSessions: AutomationSession[],
+) {
+  if (project.status === 'Launched') return 100
+
+  const projectCampaigns = campaigns.filter((campaign) => campaign.projectId === project.id)
+  const projectSessions = automationSessions.filter((session) => session.projectId === project.id)
+  const completedCampaigns = projectCampaigns.filter((campaign) => campaign.status !== 'Draft').length
+  const averageSessionProgress =
+    projectSessions.length > 0
+      ? projectSessions.reduce((total, session) => total + session.progress, 0) / projectSessions.length
+      : 0
+
+  let score = 0
+  if (project.description) score += 12
+  if (project.targetAudience) score += 10
+  if (project.goal) score += 10
+  if (project.repoUrl) score += 8
+  if (project.demoUrl) score += 10
+  if (project.logoUrl) score += 8
+  score += Math.min(projectCampaigns.length * 8, 24)
+  score += Math.min(completedCampaigns * 6, 18)
+  score += Math.min(Math.round(averageSessionProgress / 2), 20)
+
+  return Math.max(0, Math.min(100, score))
+}
+
+function normalizeAutomationUsername(projectName: string, platform: PlatformName) {
+  const slug = projectName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'virel'
+
+  if (platform === 'Reddit') return `u/${slug}`
+  if (platform === 'Hacker News') return slug
+  return `@${slug}`
+}
+
+function buildGuidedAutomationPayload(project: Project, settings: UserSettings, platform: PlatformName) {
+  return {
+    username: normalizeAutomationUsername(project.name, platform),
+    display_name: settings.displayName || project.name,
+    bio: settings.brandBio || project.description || project.tagline,
+    profile_image_url: settings.profileImageUrl || project.logoUrl || null,
+    account_url: settings.websiteUrl || project.demoUrl || null,
+    company_name: settings.companyName || project.name,
+    legal_entity_name: settings.legalEntityName || project.name,
+    company_start_date: settings.companyStartDate,
+    website_url: settings.websiteUrl || project.demoUrl || '',
+    support_email: settings.supportEmail,
+    phone_number: settings.phoneNumber,
+    country: settings.country,
+    timezone: settings.timezone,
+    backup_email: settings.backupEmail,
+    google_account_email: settings.googleAccountEmail,
+    google_link_status: settings.googleLinkStatus,
+    brand_handle: settings.brandHandle,
+    brand_bio: settings.brandBio || project.description || project.tagline,
+    linkedin_url: settings.linkedinUrl,
+    instagram_handle: settings.instagramHandle,
+    x_handle: settings.xHandle,
+    tiktok_handle: settings.tiktokHandle,
+    reddit_username: settings.redditUsername,
+    project_name: project.name,
+    project_description: project.description || '',
+    project_goal: project.goal || '',
+    project_target_audience: project.targetAudience || '',
+  }
+}
+
+function buildPlatformAccountInput(project: Project, settings: UserSettings, platform: PlatformName) {
+  const bio = settings.brandBio || project.description || project.tagline
+  const username = normalizeAutomationUsername(project.name, platform)
+  const accountUrl = settings.websiteUrl || project.demoUrl || null
+
+  return {
+    platform,
+    username,
+    bio,
+    profileImageUrl: settings.profileImageUrl || project.logoUrl || null,
+    accountUrl,
+    status: 'Pending' as const,
+    notes: `Prepared for ${project.name} using saved brand defaults.`,
+    phoneRequired: platform === 'Instagram' || platform === 'LinkedIn' || platform === 'X' || platform === 'TikTok',
+  }
+}
+
+function createEmptyUserSettings(): UserSettings {
+  return {
+    companyName: '',
+    legalEntityName: '',
+    companyStartDate: '',
+    websiteUrl: '',
+    supportEmail: '',
+    phoneNumber: '',
+    country: '',
+    timezone: '',
+    displayName: '',
+    brandHandle: '',
+    brandBio: '',
+    profileImageUrl: '',
+    backupEmail: '',
+    googleAccountEmail: '',
+    googleLinkStatus: 'Not linked',
+    linkedinUrl: '',
+    instagramHandle: '',
+    xHandle: '',
+    tiktokHandle: '',
+    redditUsername: '',
+    emailNotifications: true,
+    defaultTone: 'Confident',
+    themeMode: 'System',
+  }
+}
+
 function CampaignsView() {
   const projectsState = useAsync(getProjects)
   const campaignsState = useAsync(getCampaigns)
@@ -662,7 +807,7 @@ function CampaignsView() {
         goal,
         platforms,
         tone,
-        title: title || `${selectedProject.name} launch sprint`,
+        title: title || `${selectedProject.name} launch campaign`,
       }
       const campaign = await generateCampaign(payload)
       setGeneratedCampaign(campaign)
@@ -691,7 +836,7 @@ function CampaignsView() {
         <SectionHeader
           eyebrow="Campaigns"
           title="Campaigns"
-          description="Pick a project, set the tone, and shape the 7-day plan."
+          description="Pick a project, set the tone, and shape the three-phase campaign timeline."
         />
         <div className="mt-6 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
           <div className={`${insetCard} p-5`}>
@@ -713,7 +858,7 @@ function CampaignsView() {
 
               <label className="block">
                 <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Title</span>
-                <input className={inputField} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={`${selectedProject.name} launch sprint`} />
+                <input className={inputField} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={`${selectedProject.name} launch campaign`} />
               </label>
 
               <label className="block">
@@ -768,10 +913,10 @@ function CampaignsView() {
                 </div>
 
                 <div className="grid gap-3">
-                  {previewCampaign.days.slice(0, 4).map((day) => (
+                  {previewCampaign.days.slice(0, 3).map((day) => (
                     <div key={day.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Day {day.day}</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Phase {day.day}</p>
                         <span className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-1 text-xs font-black uppercase tracking-[0.22em]">
                           {day.status}
                         </span>
@@ -857,7 +1002,16 @@ function AnalyticsView() {
   if (error) {
     return <ErrorState title="Analytics could not load." message={error} retry={analyticsState.retry} />
   }
-  if (!analytics) return <EmptyState title="No analytics available yet." description="Generate a campaign and the report cards will fill in." />
+  if (!analytics) {
+    return <EmptyState title="No analytics available yet." description="Publish a post and capture real metrics to populate this page." />
+  }
+
+  const hasRealAnalyticsData =
+    analytics.timeline.length > 0 || analytics.platforms.length > 0 || analytics.topPosts.length > 0 || analytics.summary.engagement > 0
+
+  if (!hasRealAnalyticsData) {
+    return <EmptyState title="No real analytics yet." description="Analytics will appear after published posts generate tracked engagement." />
+  }
 
   const topPosts = analytics.topPosts.slice(0, 4)
 
@@ -932,213 +1086,21 @@ function AnalyticsView() {
 
         <article className={`${paperCard} p-6 sm:p-7`}>
           <SectionHeader eyebrow="Recent posts" title="Generated content" />
-            {topPosts.length === 0 ? (
-              <EmptyState title="No posts yet." description="Create a campaign to see posts fill this area." compact />
-            ) : (
-              <div className="mt-5 grid gap-3">
-                {topPosts.map((post) => (
-                  <div key={post.id} className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-black text-[#1f1814]">{post.title}</span>
-                      <span className="rounded-full border-[2px] border-[#2c211b] bg-[#fff0bc] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
-                        {post.platform}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-[#5f554a]">
-                      {formatNumber(post.likes)} likes · {formatNumber(post.comments)} comments · {formatNumber(post.clicks)} clicks
-                    </p>
-                  </div>
-                ))}
-              </div>
-          )}
-        </article>
-      </section>
-    </div>
-  )
-}
-
-function AutomationView() {
-  const platformsState = useAsync(getPlatforms)
-  const projectsState = useAsync(getProjects)
-  const [selectedPlatformId, setSelectedPlatformId] = useState('')
-  const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [username, setUsername] = useState('@virel')
-  const [bio, setBio] = useState('Build and launch student projects faster.')
-  const [profileImageUrl, setProfileImageUrl] = useState('')
-  const [accountUrl, setAccountUrl] = useState('')
-  const [notes, setNotes] = useState('Prepare the brand assets, then walk the user through verification.')
-  const [sessions, setSessions] = useState<AutomationSession[]>([])
-  const [sessionError, setSessionError] = useState<string | null>(null)
-
-  const platforms = platformsState.data ?? []
-  const projects = projectsState.data ?? []
-  const selectedPlatform = platforms.find((platform) => platform.id === selectedPlatformId) ?? platforms[0]
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
-
-  async function handleRequestConnection() {
-    if (!selectedProject || !selectedPlatform) return
-    setSessionError(null)
-    try {
-      const session = await connectAutomation({
-        projectId: selectedProject.id,
-        platform: selectedPlatform.name,
-        payload: {
-          username,
-          bio,
-          profile_image_url: profileImageUrl,
-          account_url: accountUrl,
-          notes,
-        },
-      })
-      setSessions((current) => [session, ...current])
-    } catch (error) {
-      setSessionError(error instanceof Error ? error.message : 'Automation connect failed.')
-    }
-  }
-
-  async function handleQueueSession() {
-    if (!selectedProject || !selectedPlatform) return
-    setSessionError(null)
-    try {
-      const session = await createAutomationSession({
-        projectId: selectedProject.id,
-        platform: selectedPlatform.name,
-        status: 'queued',
-        step: 'draft_created',
-        progress: 12,
-        payload: {
-          username,
-          bio,
-          profile_image_url: profileImageUrl,
-          account_url: accountUrl,
-          notes,
-        },
-      })
-      setSessions((current) => [session, ...current])
-    } catch (error) {
-      setSessionError(error instanceof Error ? error.message : 'Automation session creation failed.')
-    }
-  }
-
-  if (platformsState.isLoading || projectsState.isLoading) return <LoadingGrid />
-  if (platformsState.error) return <ErrorState title="Automation catalog could not load." message={platformsState.error} retry={platformsState.retry} />
-  if (projectsState.error) return <ErrorState title="Projects are required for automation." message={projectsState.error} retry={projectsState.retry} />
-  if (!selectedPlatform || !selectedProject) return <EmptyState title="Create a project first" description="Automation sessions need a project and a supported platform." />
-
-  return (
-    <div className="space-y-6">
-      <section className={`${paperCard} p-6 sm:p-7`}>
-        <SectionHeader
-          eyebrow="Automation"
-          title="Automation"
-          description="Create connection sessions for branded account setup. The user still approves every verification step."
-        />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-          <div className="grid gap-3">
-            {platforms.map((platform, index) => (
-              <button
-                key={platform.id}
-                type="button"
-                onClick={() => setSelectedPlatformId(platform.id)}
-                className={`rounded-[26px] border-[2px] border-[#2c211b] px-4 py-4 text-left shadow-[6px_6px_16px_rgba(45,33,26,0.05)] transition hover:-translate-y-0.5 ${
-                  selectedPlatform.id === platform.id ? NAV_ITEMS[index % NAV_ITEMS.length].color + ' text-[#1f1814]' : 'bg-white text-[#1f1814]'
-                }`}
-              >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="min-w-0 break-words font-black leading-tight">{platform.name}</span>
-                      <StatusBadge status={platform.status} />
-                    </div>
-                    <p className="mt-2 text-sm text-current/80">{platform.username}</p>
-                  </div>
-                  <ChevronRight className="h-4 w-4" />
-                </div>
-                <p className="mt-3 text-sm leading-6 text-current/70">{platform.notes || platform.automation}</p>
-              </button>
-            ))}
-          </div>
-
-          <div className={`${insetCard} p-5`}>
-            <SectionHeader eyebrow="Connection brief" title={`Setup ${selectedPlatform.name}`} description="Enter the brand details once, then queue or request the live connect flow." />
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <Field label="Project to connect" description="Choose the project this account setup belongs to." className="sm:col-span-2">
-                <select className={inputField} value={selectedProject.id} onChange={(event) => setSelectedProjectId(event.target.value)}>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Account username" description="Example: @studysnapai">
-                <input className={inputField} value={username} onChange={(event) => setUsername(event.target.value)} />
-              </Field>
-              <Field label="Account URL" description="Paste the profile URL if the account already exists.">
-                <input className={inputField} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
-              </Field>
-              <Field label="Profile bio" description="Short account bio shown on the profile page." className="sm:col-span-2">
-                <textarea className={textareaField} value={bio} onChange={(event) => setBio(event.target.value)} />
-              </Field>
-              <Field label="Profile image URL" description="Paste a hosted image URL for the profile photo." className="sm:col-span-2">
-                <input className={inputField} value={profileImageUrl} onChange={(event) => setProfileImageUrl(event.target.value)} placeholder="https://..." />
-              </Field>
-              <Field label="Verification notes" description="Add anything the user should confirm manually during setup." className="sm:col-span-2">
-                <textarea className={textareaField} value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </Field>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-3">
-              <DashboardAction onClick={() => void handleRequestConnection()} tone="blue">
-                <UserRoundPlus className="h-4 w-4" />
-                Request connect
-              </DashboardAction>
-              <DashboardAction onClick={() => void handleQueueSession()} tone="coral">
-                <CircleDashed className="h-4 w-4" />
-                Queue session
-              </DashboardAction>
-            </div>
-            {sessionError && <p className="mt-4 text-sm font-medium text-[#b97fd6]">{sessionError}</p>}
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.03fr_0.97fr]">
-        <article className={`${paperCard} p-6 sm:p-7`}>
-          <SectionHeader eyebrow="Supported platforms" title="Supported platforms" />
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {platforms.map((platform) => (
-              <div key={platform.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <span className="min-w-0 break-words font-black leading-tight text-[#1f1814]">{platform.name}</span>
-                  <StatusBadge status={platform.status} />
-                </div>
-                <p className="mt-3 text-sm leading-6 text-[#5f554a]">{platform.notes || platform.automation}</p>
-                <p className="mt-3 text-xs font-black uppercase tracking-[0.26em] text-[#6b625a]">
-                  {platform.phoneRequired ? 'Phone may be required' : 'Email-friendly'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className={`${paperCard} p-6 sm:p-7`}>
-          <SectionHeader eyebrow="Session log" title="Recent requests" />
-          {sessions.length === 0 ? (
-            <EmptyState title="No sessions yet." description="Request or queue a setup to see the session response here." compact />
+          {topPosts.length === 0 ? (
+            <EmptyState title="No posts yet." description="Create a campaign to see posts fill this area." compact />
           ) : (
-            <div className="mt-5 space-y-3">
-              {sessions.map((session) => (
-                <div key={session.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
-                  <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">{session.platform}</p>
-                    <p className="mt-2 font-black text-[#1f1814]">{session.step}</p>
+            <div className="mt-5 grid gap-3">
+              {topPosts.map((post) => (
+                <div key={post.id} className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 break-words font-black text-[#1f1814]">{post.title}</span>
+                    <span className="shrink-0 rounded-full border-[2px] border-[#2c211b] bg-[#fff0bc] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
+                      {post.platform}
+                    </span>
                   </div>
-                    <StatusBadge status={session.status} />
-                  </div>
-                  <div className="mt-3 h-3 rounded-full border-[2px] border-[#2c211b] bg-white">
-                    <div className="h-full rounded-full bg-[#d9f1e5]" style={{ width: `${Math.min(Math.max(session.progress, 0), 100)}%` }} />
-                  </div>
+                  <p className="mt-2 text-sm leading-6 text-[#5f554a]">
+                    {formatNumber(post.likes)} likes · {formatNumber(post.comments)} comments · {formatNumber(post.clicks)} clicks
+                  </p>
                 </div>
               ))}
             </div>
@@ -1149,57 +1111,366 @@ function AutomationView() {
   )
 }
 
+function AutomationView() {
+  const projectsState = useAsync(getProjects)
+  const campaignsState = useAsync(getCampaigns)
+  const sessionsState = useAsync(getAutomationSessions)
+  const platformsState = useAsync(getPlatforms)
+  const settingsState = useAsync(getUserSettings)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [activePlatform, setActivePlatform] = useState<PlatformName | null>(null)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const projects = projectsState.data ?? []
+  const campaigns = campaignsState.data ?? []
+  const platforms = platformsState.data ?? []
+  const settings = settingsState.data
+
+  useEffect(() => {
+    if (!projects.length) {
+      setSelectedProjectId(null)
+      return
+    }
+    if (!selectedProjectId || !projects.some((project) => project.id === selectedProjectId)) {
+      setSelectedProjectId(projects[0].id)
+    }
+  }, [projects, selectedProjectId])
+
+  useEffect(() => {
+    setActivePlatform(null)
+  }, [selectedProjectId])
+
+  const accountsLoader = useMemo<() => Promise<PlatformAccount[]>>(() => {
+    if (!selectedProjectId) return async () => [] as PlatformAccount[]
+    return () => getProjectAccounts(selectedProjectId)
+  }, [selectedProjectId])
+  const accountsState = useAsync(accountsLoader)
+  const accounts = accountsState.data ?? []
+  const currentProject = projects.find((project) => project.id === selectedProjectId) ?? null
+  const accountByPlatform = useMemo(() => new Map(accounts.map((account) => [account.platform, account])), [accounts])
+  const activeAccount = activePlatform ? accountByPlatform.get(activePlatform) ?? null : null
+  const currentProjectCampaigns = campaigns.filter((campaign) => campaign.projectId === currentProject?.id)
+  const connectedCount = accounts.filter((account) => account.status === 'Connected').length
+  const needsReviewCount = accounts.filter((account) => account.status === 'Needs verification' || account.status === 'Pending').length
+
+  async function handlePrepareAccount(platform: PlatformName) {
+    if (!currentProject || !settings) return
+    setActionError(null)
+    setActionMessage(null)
+    try {
+      const created = await createProjectAccount(currentProject.id, buildPlatformAccountInput(currentProject, settings, platform))
+      accountsState.setData([created, ...accounts.filter((account) => account.id !== created.id)])
+      setActivePlatform(created.platform)
+      setActionMessage(`${platform} account prepared.`)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to prepare account.')
+    }
+  }
+
+  const modalPlatform = activePlatform ? platforms.find((platform) => platform.name === activePlatform) ?? null : null
+
+  if (projectsState.isLoading || campaignsState.isLoading || sessionsState.isLoading || platformsState.isLoading || settingsState.isLoading) {
+    return <LoadingGrid />
+  }
+  const error = projectsState.error || campaignsState.error || sessionsState.error || platformsState.error || settingsState.error
+  if (error) {
+    const retry = projectsState.error
+      ? projectsState.retry
+      : campaignsState.error
+        ? campaignsState.retry
+        : sessionsState.error
+          ? sessionsState.retry
+          : platformsState.error
+            ? platformsState.retry
+            : settingsState.retry
+    return <ErrorState title="Automation could not load." message={error} retry={retry} />
+  }
+
+  if (!projects.length) {
+    return <EmptyState title="No projects to manage yet." description="Create a project first, then return here to manage its social accounts." />
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <SectionHeader
+            eyebrow="Automation"
+            title="Account management"
+            description="Click a platform card to open a live mobile preview in a modal. Setup stays assisted; verification stays manual."
+          />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 lg:min-w-[620px]">
+            <StatPill label="Projects" value={projects.length.toString()} color="bg-[#d2e5ff]" />
+            <StatPill label="Accounts" value={accounts.length.toString()} color="bg-[#fde2cf]" />
+            <StatPill label="Connected" value={connectedCount.toString()} color="bg-[#d9f1e5]" />
+            <StatPill label="Needs review" value={needsReviewCount.toString()} color="bg-[#e4dbff]" />
+          </div>
+        </div>
+      </section>
+
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#b97fd6]">Active project</p>
+            <label className="mt-2 block">
+              <span className="sr-only">Select project</span>
+              <select
+                className="w-full rounded-[24px] border-[2px] border-[#2c211b] bg-white px-4 py-4 text-lg font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.05)] outline-none"
+                value={currentProject?.id ?? ''}
+                onChange={(event) => setSelectedProjectId(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+            <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#7ea8ff]">Current status</p>
+            <p className="mt-2 text-sm leading-6 text-[#5f554a]">
+              {currentProject?.description || currentProject?.tagline || 'No project description available.'}
+            </p>
+            <p className="mt-3 text-xs font-black uppercase tracking-[0.18em] text-[#6b625a]">
+              {currentProjectCampaigns.length} campaigns · {accounts.length} accounts
+            </p>
+          </div>
+        </div>
+        {actionMessage && <p className="mt-4 text-sm font-medium text-[#1f1814]">{actionMessage}</p>}
+        {actionError && <p className="mt-2 text-sm font-medium text-[#b97fd6]">{actionError}</p>}
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {platforms.map((platform) => {
+          const account = accountByPlatform.get(platform.name)
+          const isActive = activePlatform === platform.name
+          return (
+            <button
+              key={platform.id}
+              type="button"
+              onClick={() => setActivePlatform(platform.name)}
+              className={`rounded-[28px] border-[2px] border-[#2c211b] p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[10px_10px_24px_rgba(45,33,26,0.08)] ${
+                isActive ? 'bg-[#f7d9ea]' : 'bg-white'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.32em] text-[#b97fd6]">{platform.name.toLowerCase().replaceAll(' ', '_')}</p>
+                  <h3 className="mt-2 font-display text-3xl font-black tracking-tight text-[#1f1814]">{platform.name}</h3>
+                </div>
+                <StatusBadge status={account?.status ?? (platform.phoneRequired ? 'Needs verification' : 'Pending')} />
+              </div>
+              <p className="mt-4 text-sm leading-6 text-[#5f554a] line-clamp-3">{platform.notes}</p>
+              <div className="mt-4 rounded-[22px] border-[2px] border-[#2c211b] bg-[#fffaf4] px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#6b625a]">
+                {account?.username ?? 'No account yet'}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className={`rounded-full border-[2px] border-[#2c211b] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${account ? 'bg-[#d9f1e5]' : 'bg-[#fde2cf]'}`}>
+                  {account ? 'Open preview' : 'Prepare'}
+                </span>
+                <span className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#6b625a]">
+                  {platform.phoneRequired ? 'Phone likely required' : 'Email-first'}
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </section>
+
+      {activePlatform && modalPlatform && (
+        <Modal
+          title={`${modalPlatform.name} account`}
+          onClose={() => setActivePlatform(null)}
+          className="max-w-6xl"
+        >
+          <PhoneSimulator
+            account={activeAccount}
+            platform={modalPlatform}
+            project={currentProject}
+            settings={settings}
+            onPrepareAccount={() => void handlePrepareAccount(modalPlatform.name)}
+          />
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+function PhoneSimulator({
+  account,
+  platform,
+  project,
+  settings,
+  onPrepareAccount,
+}: {
+  account: PlatformAccount | null
+  platform: Platform
+  project: Project | null
+  settings: UserSettings | null
+  onPrepareAccount: () => void
+}) {
+  const profileUrl = resolvePlatformUrl(platform.name, account, project, settings)
+  const username = account?.username || normalizeAutomationUsername(project?.name ?? 'Virel', platform.name)
+  const status = account?.status ?? (platform.phoneRequired ? 'Needs verification' : 'Pending')
+  const isConnected = account?.status === 'Connected'
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="rounded-[34px] border-[2px] border-[#2c211b] bg-[#0f0f12] p-3 shadow-[10px_10px_24px_rgba(45,33,26,0.08)]">
+        <div className="overflow-hidden rounded-[28px] border-[1px] border-white/10 bg-[#f8f4ee]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2c211b]/10 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.32em] text-[#7ea8ff]">{project?.name ?? 'Project'}</p>
+              <p className="mt-1 truncate text-sm font-black text-[#1f1814]">{platform.name} mobile view</p>
+            </div>
+            <a
+              className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#1f1814]"
+              href={profileUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open live site
+            </a>
+          </div>
+
+          <div className="px-3 pb-3 pt-3">
+            <div className="mx-auto max-w-[420px] rounded-[36px] border-[2px] border-[#2c211b] bg-white shadow-[0_12px_30px_rgba(45,33,26,0.12)]">
+              <div className="flex items-center gap-2 border-b border-[#2c211b]/10 px-4 py-3">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#fde2cf]" />
+                <span className="h-2.5 w-2.5 rounded-full bg-[#fff0bc]" />
+                <span className="h-2.5 w-2.5 rounded-full bg-[#d9f1e5]" />
+                <div className="ml-2 min-w-0 flex-1 rounded-full border border-[#2c211b]/10 bg-[#f8f4ee] px-3 py-2 text-[11px] font-medium text-[#6b625a]">
+                  {profileUrl}
+                </div>
+              </div>
+              <div className="h-[72vh] min-h-[620px] overflow-hidden bg-white">
+                <iframe className="h-full w-full border-0 bg-white" src={profileUrl} title={`${platform.name} live preview`} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside className="space-y-4">
+        <div className="rounded-[28px] border-[2px] border-[#2c211b] bg-white p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#b97fd6]">Account</p>
+          <h3 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">{platform.name}</h3>
+          <div className="mt-4 grid gap-3 text-sm leading-6 text-[#5f554a]">
+            <p>
+              Username: <span className="font-black text-[#1f1814]">{username}</span>
+            </p>
+            <p>
+              Status: <span className="font-black text-[#1f1814]">{status}</span>
+            </p>
+            <p>
+              Mode: <span className="font-black text-[#1f1814]">{isConnected ? 'Logged in' : 'Preview'}</span>
+            </p>
+            <p>{platform.notes}</p>
+          </div>
+        </div>
+
+        <div className="rounded-[28px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#7ea8ff]">Website</p>
+          <p className="mt-2 break-all text-sm leading-6 text-[#5f554a]">{profileUrl}</p>
+          <p className="mt-3 text-sm leading-6 text-[#5f554a]">
+            If the platform blocks embedding, the live site is still available in the browser tab.
+          </p>
+        </div>
+
+        {!account && (
+          <button
+            className="w-full rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff] px-5 py-3 text-sm font-black text-[#1f1814]"
+            type="button"
+            onClick={onPrepareAccount}
+          >
+            Prepare account
+          </button>
+        )}
+      </aside>
+    </div>
+  )
+}
+
+function resolvePlatformUrl(platform: PlatformName, account: PlatformAccount | null, project: Project | null, settings: UserSettings | null) {
+  const explicit = account?.accountUrl || (platform === 'LinkedIn' ? settings?.linkedinUrl : '') || settings?.websiteUrl || project?.demoUrl || ''
+  if (explicit) return explicit
+
+  const slug = (account?.username || normalizeAutomationUsername(project?.name ?? 'Virel', platform))
+    .toLowerCase()
+    .replace(/^@/, '')
+    .replace(/^u\//, '')
+
+  if (platform === 'Instagram') return `https://www.instagram.com/${slug}/`
+  if (platform === 'Facebook') return 'https://www.facebook.com/'
+  if (platform === 'X') return `https://x.com/${slug}`
+  if (platform === 'Reddit') return `https://www.reddit.com/user/${slug}/`
+  if (platform === 'LinkedIn') return settings?.linkedinUrl || 'https://www.linkedin.com/'
+  if (platform === 'TikTok') return `https://www.tiktok.com/@${slug}`
+  if (platform === 'Telegram') return `https://t.me/${slug}`
+  if (platform === 'Hacker News') return 'https://news.ycombinator.com/'
+  return 'https://www.google.com'
+}
+
 function SettingsView() {
-  const [companyName, setCompanyName] = useState('Virel')
-  const [legalEntityName, setLegalEntityName] = useState('Virel Labs Pte. Ltd.')
-  const [companyStartDate, setCompanyStartDate] = useState('2026-06-01')
-  const [websiteUrl, setWebsiteUrl] = useState('https://virel.example.com')
-  const [supportEmail, setSupportEmail] = useState('support@virel.example.com')
-  const [phoneNumber, setPhoneNumber] = useState('+65 9123 4567')
-  const [country, setCountry] = useState('Singapore')
-  const [timezone, setTimezone] = useState('Asia/Singapore')
-  const [displayName, setDisplayName] = useState('Virel')
-  const [brandHandle, setBrandHandle] = useState('@virel')
-  const [brandBio, setBrandBio] = useState('Launch student projects with polished branding and guided setup.')
-  const [profileImageUrl, setProfileImageUrl] = useState('https://cdn.example.com/virel-avatar.png')
-  const [backupEmail, setBackupEmail] = useState('ops@virel.example.com')
-  const [googleAccountEmail, setGoogleAccountEmail] = useState('founders@virel.example.com')
-  const [googleLinkStatus, setGoogleLinkStatus] = useState<'Not linked' | 'Pending' | 'Linked'>('Not linked')
-  const [linkedinUrl, setLinkedinUrl] = useState('https://www.linkedin.com/company/virel')
-  const [instagramHandle, setInstagramHandle] = useState('@virel')
-  const [xHandle, setXHandle] = useState('@virel')
-  const [tiktokHandle, setTiktokHandle] = useState('@virel')
-  const [redditUsername, setRedditUsername] = useState('u/VirelHQ')
-  const [emailNotifications, setEmailNotifications] = useState(true)
-  const [defaultTone, setDefaultTone] = useState('Confident')
-  const [themeMode, setThemeMode] = useState<'System' | 'Light' | 'Dark'>('System')
+  const settingsState = useAsync(getUserSettings)
+  const [draft, setDraft] = useState<UserSettings>(createEmptyUserSettings())
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (settingsState.data) {
+      setDraft(settingsState.data)
+    }
+  }, [settingsState.data])
 
   const requiredCount = [
-    companyName,
-    legalEntityName,
-    companyStartDate,
-    websiteUrl,
-    supportEmail,
-    phoneNumber,
-    country,
-    timezone,
-    displayName,
-    brandHandle,
-    brandBio,
-    profileImageUrl,
-    backupEmail,
-    googleAccountEmail,
-    linkedinUrl,
-    instagramHandle,
-    xHandle,
-    tiktokHandle,
-    redditUsername,
+    draft.companyName,
+    draft.legalEntityName,
+    draft.companyStartDate,
+    draft.websiteUrl,
+    draft.supportEmail,
+    draft.phoneNumber,
+    draft.country,
+    draft.timezone,
+    draft.displayName,
+    draft.brandHandle,
+    draft.brandBio,
+    draft.profileImageUrl,
+    draft.backupEmail,
+    draft.googleAccountEmail,
+    draft.linkedinUrl,
+    draft.instagramHandle,
+    draft.xHandle,
+    draft.tiktokHandle,
+    draft.redditUsername,
   ].filter(Boolean).length
 
+  function updateField<K extends keyof UserSettings>(key: K, value: UserSettings[K]) {
+    setDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  async function handleSave() {
+    setSaveError(null)
+    setSaveMessage(null)
+    try {
+      const updated = await updateUserSettings(draft)
+      setDraft(updated)
+      settingsState.setData(updated)
+      setSaveMessage('Settings saved.')
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save settings.')
+    }
+  }
+
   function startGoogleLink() {
-    setGoogleLinkStatus('Pending')
+    updateField('googleLinkStatus', 'Pending')
     window.open('https://accounts.google.com/', '_blank', 'noopener,noreferrer')
   }
+
+  if (settingsState.isLoading) return <LoadingGrid />
+  if (settingsState.error) return <ErrorState title="Settings could not load." message={settingsState.error} retry={settingsState.retry} />
 
   return (
     <div className="space-y-6">
@@ -1207,71 +1478,79 @@ function SettingsView() {
         <SectionHeader
           eyebrow="Settings"
           title="Identity studio"
-          description="Store the business and identity details needed to create and verify official social accounts."
+          description="Store the business and identity details used across project setup and guided account creation."
         />
 
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
           <SettingsCard title="Business profile">
             <Field label="Company name" description="The public brand name shown on profiles and pages.">
-              <input className={inputField} value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+              <input className={inputField} value={draft.companyName} onChange={(event) => updateField('companyName', event.target.value)} />
             </Field>
             <Field label="Legal entity name" description="The registered company name used for verification.">
-              <input className={inputField} value={legalEntityName} onChange={(event) => setLegalEntityName(event.target.value)} />
+              <input className={inputField} value={draft.legalEntityName} onChange={(event) => updateField('legalEntityName', event.target.value)} />
             </Field>
             <Field label="Company start date" description="The date the business or project officially started.">
-              <input className={inputField} type="date" value={companyStartDate} onChange={(event) => setCompanyStartDate(event.target.value)} />
+              <input className={inputField} type="date" value={draft.companyStartDate} onChange={(event) => updateField('companyStartDate', event.target.value)} />
             </Field>
             <Field label="Website" description="Your main public website or landing page URL.">
-              <input className={inputField} value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} />
+              <input className={inputField} value={draft.websiteUrl} onChange={(event) => updateField('websiteUrl', event.target.value)} />
             </Field>
             <Field label="Support email" description="Use the inbox you want platform teams to contact.">
-              <input className={inputField} value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} />
+              <input className={inputField} value={draft.supportEmail} onChange={(event) => updateField('supportEmail', event.target.value)} />
             </Field>
             <Field label="Phone number" description="The number used for verification or recovery.">
-              <input className={inputField} value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} />
+              <input className={inputField} value={draft.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Country" description="Where the business is based.">
-                <input className={inputField} value={country} onChange={(event) => setCountry(event.target.value)} />
+                <input className={inputField} value={draft.country} onChange={(event) => updateField('country', event.target.value)} />
               </Field>
               <Field label="Timezone" description="Use the timezone where the team operates.">
-                <input className={inputField} value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+                <input className={inputField} value={draft.timezone} onChange={(event) => updateField('timezone', event.target.value)} />
               </Field>
             </div>
           </SettingsCard>
 
           <SettingsCard title="Brand identity">
             <Field label="Display name" description="How the account name appears publicly.">
-              <input className={inputField} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              <input className={inputField} value={draft.displayName} onChange={(event) => updateField('displayName', event.target.value)} />
             </Field>
             <Field label="Primary handle" description="The default username you want to secure.">
-              <input className={inputField} value={brandHandle} onChange={(event) => setBrandHandle(event.target.value)} />
+              <input className={inputField} value={draft.brandHandle} onChange={(event) => updateField('brandHandle', event.target.value)} />
             </Field>
             <Field label="Brand bio" description="A short summary of the project or company.">
-              <textarea className={textareaField} value={brandBio} onChange={(event) => setBrandBio(event.target.value)} />
+              <textarea className={textareaField} value={draft.brandBio} onChange={(event) => updateField('brandBio', event.target.value)} />
             </Field>
-            <Field label="Profile image URL" description="Hosted image link for the account avatar.">
-              <input className={inputField} value={profileImageUrl} onChange={(event) => setProfileImageUrl(event.target.value)} />
-            </Field>
+            <ImageUploadField
+              description="Upload the brand avatar shown across social accounts."
+              label="Profile image"
+              onChange={(value) => updateField('profileImageUrl', value)}
+              shape="circle"
+              value={draft.profileImageUrl}
+            />
             <Field label="Backup email" description="A recovery inbox if the primary account is locked.">
-              <input className={inputField} value={backupEmail} onChange={(event) => setBackupEmail(event.target.value)} />
+              <input className={inputField} value={draft.backupEmail} onChange={(event) => updateField('backupEmail', event.target.value)} />
             </Field>
             <Field label="Default campaign tone" description="The default voice used for generated content.">
-              <input className={inputField} value={defaultTone} onChange={(event) => setDefaultTone(event.target.value)} />
+              <input className={inputField} value={draft.defaultTone} onChange={(event) => updateField('defaultTone', event.target.value)} />
             </Field>
             <label className="flex items-center gap-3 rounded-[24px] border-[2px] border-[#2c211b] bg-white px-4 py-3 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
-              <input checked={emailNotifications} onChange={(event) => setEmailNotifications(event.target.checked)} type="checkbox" />
+              <input checked={draft.emailNotifications} onChange={(event) => updateField('emailNotifications', event.target.checked)} type="checkbox" />
               <span className="text-sm font-medium text-[#5f554a]">Email campaign and verification alerts</span>
             </label>
           </SettingsCard>
 
           <SettingsCard title="Google connection">
             <Field label="Google account email" description="The Google account used to link and sign in.">
-              <input className={inputField} value={googleAccountEmail} onChange={(event) => setGoogleAccountEmail(event.target.value)} />
+              <input className={inputField} value={draft.googleAccountEmail} onChange={(event) => updateField('googleAccountEmail', event.target.value)} />
             </Field>
             <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
               <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Status</p>
-              <p className="mt-2 text-sm font-black text-[#1f1814]">{googleLinkStatus}</p>
+              <select className={`${inputField} mt-3`} value={draft.googleLinkStatus} onChange={(event) => updateField('googleLinkStatus', event.target.value as UserSettings['googleLinkStatus'])}>
+                <option>Not linked</option>
+                <option>Pending</option>
+                <option>Linked</option>
+              </select>
               <p className="mt-2 text-sm leading-6 text-[#5f554a]">
                 Opens Google sign-in in a new tab so the user stays in control of the linking step.
               </p>
@@ -1280,26 +1559,26 @@ function SettingsView() {
               <ExternalLink className="h-4 w-4" />
               Link Google account
             </DashboardAction>
-            <button className={secondaryLink} type="button" onClick={() => setGoogleLinkStatus('Not linked')}>
+            <button className={secondaryLink} type="button" onClick={() => updateField('googleLinkStatus', 'Not linked')}>
               Reset Google status
             </button>
           </SettingsCard>
 
           <SettingsCard title="Platform handles">
             <Field label="Instagram handle" description="Example: @virel">
-              <input className={inputField} value={instagramHandle} onChange={(event) => setInstagramHandle(event.target.value)} />
+              <input className={inputField} value={draft.instagramHandle} onChange={(event) => updateField('instagramHandle', event.target.value)} />
             </Field>
             <Field label="X handle" description="Example: @virel">
-              <input className={inputField} value={xHandle} onChange={(event) => setXHandle(event.target.value)} />
+              <input className={inputField} value={draft.xHandle} onChange={(event) => updateField('xHandle', event.target.value)} />
             </Field>
             <Field label="TikTok handle" description="Example: @virel">
-              <input className={inputField} value={tiktokHandle} onChange={(event) => setTiktokHandle(event.target.value)} />
+              <input className={inputField} value={draft.tiktokHandle} onChange={(event) => updateField('tiktokHandle', event.target.value)} />
             </Field>
             <Field label="LinkedIn URL" description="The company page link used for verification or references.">
-              <input className={inputField} value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} />
+              <input className={inputField} value={draft.linkedinUrl} onChange={(event) => updateField('linkedinUrl', event.target.value)} />
             </Field>
             <Field label="Reddit username" description="Example: u/VirelHQ">
-              <input className={inputField} value={redditUsername} onChange={(event) => setRedditUsername(event.target.value)} />
+              <input className={inputField} value={draft.redditUsername} onChange={(event) => updateField('redditUsername', event.target.value)} />
             </Field>
           </SettingsCard>
 
@@ -1320,9 +1599,9 @@ function SettingsView() {
                   key={mode}
                   type="button"
                   className={`rounded-[22px] border-[2px] border-[#2c211b] px-3 py-3 text-sm font-black uppercase tracking-[0.18em] shadow-[4px_4px_12px_rgba(45,33,26,0.04)] ${
-                    themeMode === mode ? 'bg-[#d9f1e5] text-[#1f1814]' : 'bg-white text-[#1f1814]'
+                    draft.themeMode === mode ? 'bg-[#d9f1e5] text-[#1f1814]' : 'bg-white text-[#1f1814]'
                   }`}
-                  onClick={() => setThemeMode(mode)}
+                  onClick={() => updateField('themeMode', mode)}
                 >
                   {mode}
                 </button>
@@ -1335,6 +1614,16 @@ function SettingsView() {
               Archive workspace
             </button>
           </SettingsCard>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            {saveMessage && <p className="text-sm font-medium text-[#1f1814]">{saveMessage}</p>}
+            {saveError && <p className="text-sm font-medium text-[#b97fd6]">{saveError}</p>}
+          </div>
+          <DashboardAction onClick={() => void handleSave()} tone="dark">
+            Save settings
+          </DashboardAction>
         </div>
       </section>
     </div>
@@ -1370,14 +1659,91 @@ function Field({
   )
 }
 
+function ImageUploadField({
+  label,
+  description,
+  value,
+  onChange,
+  className = '',
+  shape = 'square',
+}: {
+  label: string
+  description?: string
+  value: string
+  onChange: (value: string) => void
+  className?: string
+  shape?: 'square' | 'circle'
+}) {
+  const [isUploading, setIsUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setError(null)
+    setIsUploading(true)
+    try {
+      const uploaded = await uploadImage(file)
+      onChange(uploaded.url)
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Image upload failed.')
+    } finally {
+      setIsUploading(false)
+      event.target.value = ''
+    }
+  }
+
+  return (
+    <Field label={label} description={description} className={className}>
+      <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+        <div className="flex items-start gap-4">
+          <div
+            className={`grid h-20 w-20 shrink-0 place-items-center overflow-hidden border-[2px] border-[#2c211b] bg-[#fffaf4] ${
+              shape === 'circle' ? 'rounded-full' : 'rounded-[22px]'
+            }`}
+          >
+            {value ? (
+              <img alt="" className="h-full w-full object-cover" src={value} />
+            ) : (
+              <Upload className="h-6 w-6 text-[#b97fd6]" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black text-[#1f1814]">{value ? 'Uploaded image' : 'No image uploaded yet'}</p>
+            <p className="mt-1 text-xs leading-5 text-[#6b625a]">
+              {isUploading ? 'Uploading image...' : 'Choose a PNG, JPG, or WebP file.'}
+            </p>
+            <label className="mt-3 inline-flex cursor-pointer items-center justify-center rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#1f1814] shadow-[4px_4px_12px_rgba(45,33,26,0.04)]">
+              <input className="sr-only" accept="image/*" onChange={handleFileChange} type="file" />
+              {isUploading ? 'Uploading…' : value ? 'Replace image' : 'Upload image'}
+            </label>
+            {value && (
+              <button
+                className="ml-3 mt-3 inline-flex items-center justify-center rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#1f1814] shadow-[4px_4px_12px_rgba(45,33,26,0.04)]"
+                onClick={() => onChange('')}
+                type="button"
+              >
+                Remove
+              </button>
+            )}
+            {error && <p className="mt-3 text-xs font-medium text-[#b97fd6]">{error}</p>}
+          </div>
+        </div>
+      </div>
+    </Field>
+  )
+}
+
 function ProjectModal({
   initial,
+  settings,
   onCancel,
   onSave,
 }: {
   initial?: Project
+  settings?: UserSettings | null
   onCancel: () => void
-  onSave: (values: ProjectInput) => Promise<void>
+  onSave: (values: ProjectFormValues) => Promise<void>
 }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? initial?.tagline ?? '')
@@ -1387,6 +1753,13 @@ function ProjectModal({
   const [repoUrl, setRepoUrl] = useState(initial?.repoUrl ?? '')
   const [demoUrl, setDemoUrl] = useState(initial?.demoUrl ?? '')
   const [logoUrl, setLogoUrl] = useState(initial?.logoUrl ?? '')
+  const [launchPlatforms, setLaunchPlatforms] = useState<PlatformName[]>([])
+
+  function toggleLaunchPlatform(platform: PlatformName) {
+    setLaunchPlatforms((current) =>
+      current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform],
+    )
+  }
 
   return (
     <Modal title={initial ? 'Edit project' : 'Create project'} onClose={onCancel}>
@@ -1395,14 +1768,17 @@ function ProjectModal({
         onSubmit={(event) => {
           event.preventDefault()
           void onSave({
-            name,
-            description,
-            targetAudience,
-            goal,
-            status,
-            repoUrl: repoUrl || null,
-            demoUrl: demoUrl || null,
-            logoUrl: logoUrl || null,
+            project: {
+              name,
+              description,
+              targetAudience,
+              goal,
+              status,
+              repoUrl: repoUrl || null,
+              demoUrl: demoUrl || null,
+              logoUrl: logoUrl || null,
+            },
+            launchPlatforms,
           })
         }}
       >
@@ -1432,9 +1808,29 @@ function ProjectModal({
           <Field label="Demo URL" description="Optional live demo or preview link." className="md:col-span-2">
             <input className={inputField} value={demoUrl} onChange={(event) => setDemoUrl(event.target.value)} />
           </Field>
-          <Field label="Logo URL" description="Optional project logo or brand asset URL." className="md:col-span-2">
-            <input className={inputField} value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} />
-          </Field>
+          <ImageUploadField
+            className="md:col-span-2"
+            description="Upload the project logo or brand asset."
+            label="Logo image"
+            onChange={setLogoUrl}
+            value={logoUrl}
+          />
+          {!initial && (
+            <div className="md:col-span-2 rounded-[28px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+              <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#7ea8ff]">Launch accounts</p>
+              <p className="mt-2 text-sm leading-6 text-[#5f554a]">
+                Choose the social accounts to prepare now. Username defaults from the project name, and the rest comes from your saved settings.
+              </p>
+              <div className="mt-4">
+                <PlatformChooser selected={launchPlatforms} onToggle={toggleLaunchPlatform} />
+              </div>
+              <p className="mt-3 text-xs leading-5 text-[#6b625a]">
+                {settings
+                  ? `Saved settings: ${settings.displayName || settings.companyName || 'ready'}`
+                  : 'Load settings to reuse brand defaults during account creation.'}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="mt-2 flex flex-wrap justify-end gap-3">
@@ -1450,7 +1846,17 @@ function ProjectModal({
   )
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+  className = 'max-w-4xl',
+}: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+  className?: string
+}) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[#2c211b]/45 p-4 backdrop-blur-[2px]"
@@ -1459,7 +1865,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       }}
       role="presentation"
     >
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[34px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-6 shadow-[14px_14px_24px_rgba(45,33,26,0.08)]">
+      <div className={`max-h-[90vh] w-full overflow-y-auto rounded-[34px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-6 shadow-[14px_14px_24px_rgba(45,33,26,0.08)] ${className}`}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[11px] font-black uppercase tracking-[0.32em] text-[#b97fd6]">Modal</p>
@@ -1478,7 +1884,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 function StatusBadge({ status }: { status: string }) {
   return (
     <span
-      className={`inline-flex max-w-full items-center justify-center rounded-full border-[2px] border-[#2c211b] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-center sm:px-3 sm:text-[11px] sm:tracking-[0.2em] ${statusTone(status)}`}
+      className={`inline-flex max-w-[10rem] items-center justify-center rounded-full border-[2px] border-[#2c211b] px-2.5 py-1 text-center text-[10px] font-black uppercase tracking-[0.16em] leading-tight break-words sm:px-3 sm:text-[11px] sm:tracking-[0.2em] ${statusTone(status)}`}
     >
       {status}
     </span>

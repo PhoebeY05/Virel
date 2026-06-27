@@ -18,6 +18,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.media import router as media_router
 from app.api.routes.platforms import router as platforms_router
 from app.api.routes.projects import router as projects_router
+from app.api.routes.settings import router as settings_router
 from app.auth import auth_middleware
 from app.config import Settings, get_settings
 from app.database import init_db, make_engine, make_session_factory
@@ -87,6 +88,7 @@ def build_app(settings: Settings | None = None, engine: Engine | None = None) ->
     app.include_router(projects_router)
     app.include_router(campaigns_router)
     app.include_router(comments_router)
+    app.include_router(settings_router)
     app.include_router(analytics_router)
     app.include_router(automation_router)
     app.include_router(media_router)

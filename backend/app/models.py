@@ -35,6 +35,39 @@ class User(Base, TimestampMixin):
     auth_provider: Mapped[str] = mapped_column(String(50), default="demo", nullable=False)
 
     projects: Mapped[list["Project"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+    settings: Mapped["UserSettings"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
+
+
+class UserSettings(Base, TimestampMixin):
+    __tablename__ = "user_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    company_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    legal_entity_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    company_start_date: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    website_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    support_email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    phone_number: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    country: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    timezone: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    brand_handle: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    brand_bio: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    profile_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    backup_email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    google_account_email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    google_link_status: Mapped[str] = mapped_column(String(50), default="Not linked", nullable=False)
+    linkedin_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    instagram_handle: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    x_handle: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    tiktok_handle: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    reddit_username: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    email_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    default_tone: Mapped[str] = mapped_column(String(100), default="Confident", nullable=False)
+    theme_mode: Mapped[str] = mapped_column(String(50), default="System", nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="settings")
 
 
 class Project(Base, TimestampMixin):
@@ -74,6 +107,7 @@ class Campaign(Base, TimestampMixin):
     goal: Mapped[str] = mapped_column(Text, default="", nullable=False)
     tone: Mapped[str] = mapped_column(String(100), default="confident", nullable=False)
     platforms: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    launch_signature: Mapped[str] = mapped_column(String(64), default="", nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
 
     project: Mapped[Project] = relationship(back_populates="campaigns")
@@ -199,4 +233,3 @@ class SuggestedReply(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
 
     comment: Mapped[Comment] = relationship(back_populates="suggested_replies")
-

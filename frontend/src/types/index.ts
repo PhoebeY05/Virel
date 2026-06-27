@@ -5,14 +5,16 @@ export type PlatformName =
   | 'TikTok'
   | 'X'
   | 'Facebook'
-  | 'Discord'
-  | 'Product Hunt'
+  | 'Telegram'
   | 'Hacker News'
 
 export type ProjectStatus = 'Planning' | 'Active' | 'Paused' | 'Launched'
 export type PlatformStatus = 'Connected' | 'Pending' | 'Needs verification' | 'Error'
 export type CampaignStatus = 'Draft' | 'Scheduled' | 'Live' | 'Complete'
 export type PostStatus = 'Draft' | 'Scheduled' | 'Published'
+export type GoogleLinkStatus = 'Not linked' | 'Pending' | 'Linked'
+export type ThemeMode = 'System' | 'Light' | 'Dark'
+export type PlatformAccountStatus = 'Planned' | 'Pending' | 'Connected' | 'Needs verification' | 'Paused' | 'Error'
 
 export interface Project {
   id: string
@@ -133,6 +135,21 @@ export interface Platform {
   notes?: string
 }
 
+export interface PlatformAccount {
+  id: string
+  projectId: string
+  platform: PlatformName
+  username: string
+  bio: string
+  profileImageUrl?: string | null
+  accountUrl?: string | null
+  status: PlatformAccountStatus
+  notes: string
+  phoneRequired: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AutomationSession {
   id: string
   projectId: string
@@ -143,6 +160,32 @@ export interface AutomationSession {
   payload: Record<string, unknown>
   createdAt: string
   updatedAt: string
+}
+
+export interface UserSettings {
+  companyName: string
+  legalEntityName: string
+  companyStartDate: string
+  websiteUrl: string
+  supportEmail: string
+  phoneNumber: string
+  country: string
+  timezone: string
+  displayName: string
+  brandHandle: string
+  brandBio: string
+  profileImageUrl: string
+  backupEmail: string
+  googleAccountEmail: string
+  googleLinkStatus: GoogleLinkStatus
+  linkedinUrl: string
+  instagramHandle: string
+  xHandle: string
+  tiktokHandle: string
+  redditUsername: string
+  emailNotifications: boolean
+  defaultTone: string
+  themeMode: ThemeMode
 }
 
 export interface Comment {
