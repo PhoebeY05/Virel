@@ -977,4 +977,268 @@ function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0)
 }
 
+function SettingsPanel({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="card settings-panel">
+      <h3>{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function ProjectCard({
+  project,
+  onDelete,
+  onEdit,
+}: {
+  project: Project
+  onDelete: (id: string) => Promise<void>
+  onEdit: (project: Project) => void
+}) {
+  return (
+    <article className="card project-card">
+      <div className="card-title-row">
+        <h3>{project.name}</h3>
+        <span className={`pill ${project.status.toLowerCase()}`}>{project.status}</span>
+      </div>
+      <p>{project.tagline}</p>
+      <div className="platform-line">{project.platforms.join(' / ')}</div>
+      <ProgressBar value={project.progress} />
+      <div className="card-footer">
+        <span>Updated {project.lastUpdated}</span>
+        <div>
+          <button className="tiny-button" onClick={() => onEdit(project)} type="button">
+            Edit
+          </button>
+          <button className="tiny-button danger" onClick={() => void onDelete(project.id)} type="button">
+            Delete
+          </button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function ProjectRow({ project }: { project: Project }) {
+  return (
+    <div className="row-item">
+      <span>
+        <strong>{project.name}</strong>
+        <small>{project.platforms.slice(0, 3).join(', ')}</small>
+      </span>
+      <span className="pill">{project.progress}%</span>
+    </div>
+  )
+}
+
+function PlatformCard({
+  platform,
+  onConnect,
+  onDisconnect,
+}: {
+  platform: Platform
+  onConnect: (id: string) => Promise<void>
+  onDisconnect: (id: string) => Promise<void>
+}) {
+  return (
+    <article className="card platform-card">
+      <div className="card-title-row">
+        <h3>{platform.name}</h3>
+        <span className={`pill ${platform.status.toLowerCase().replace(' ', '-')}`}>{platform.status}</span>
+      </div>
+      <p>{platform.username}</p>
+      <div className="info-list">
+        <span>{platform.automation}</span>
+        <span>{platform.phoneRequired ? 'Phone may be required' : 'Email setup friendly'}</span>
+      </div>
+      <div className="button-row">
+        <button className="primary-button" onClick={() => void onConnect(platform.id)} type="button">
+          {platform.status === 'Connected' ? 'Reconnect' : 'Connect'}
+        </button>
+        <button className="ghost-button" onClick={() => void onDisconnect(platform.id)} type="button">
+          Disconnect
+        </button>
+        <button className="ghost-button" type="button">
+          Run setup assistant
+        </button>
+      </div>
+    </article>
+  )
+}
+
+function CampaignPreview({ campaign, setView }: { campaign: Campaign; setView: (view: View) => void }) {
+  return (
+    <div className="preview-stack">
+      <div className="card-title-row">
+        <h4>{campaign.name}</h4>
+        <span className="pill">{campaign.status}</span>
+      </div>
+      <p>{campaign.goal}</p>
+      <div className="platform-line">{campaign.platforms.join(' / ')}</div>
+      <div className="mini-calendar">
+        {campaign.days.map((day) => (
+          <div className="calendar-cell" key={day.id}>
+            <strong>Day {day.day}</strong>
+            <span>{day.title}</span>
+          </div>
+        ))}
+      </div>
+      <button className="primary-button" onClick={() => setView('Calendar')} type="button">
+        Review calendar
+      </button>
+    </div>
+  )
+}
+
+function CampaignDayCard({
+  day,
+  moveDown,
+  moveUp,
+  updateContent,
+}: {
+  day: CampaignDay
+  moveDown: () => void
+  moveUp: () => void
+  updateContent: (content: string) => void
+}) {
+  return (
+    <article className="card timeline-card" draggable>
+      <div className="day-badge">Day {day.day}</div>
+      <div className="timeline-body">
+        <div className="card-title-row">
+          <h3>{day.title}</h3>
+          <span className="pill">{day.status}</span>
+        </div>
+        <p>{day.platforms.join(' / ')}</p>
+        <textarea value={day.content} onChange={(event) => updateContent(event.target.value)} rows={3} />
+        <div className="card-footer">
+          <span>{day.scheduledTime}</span>
+          <div>
+            <button className="tiny-button" onClick={moveUp} type="button">
+              Up
+            </button>
+            <button className="tiny-button" onClick={moveDown} type="button">
+              Down
+            </button>
+            <button className="tiny-button" onClick={() => updateContent(`${day.content} Fresh hook regenerated.`)} type="button">
+              Regenerate
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function PostCard({ post, updatePost }: { post: GeneratedPost; updatePost: (id: string, content: string) => void }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copyPost() {
+    await navigator.clipboard.writeText(post.content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <article className="card post-card">
+      <div className="card-title-row">
+        <h3>{post.platform}</h3>
+        <span className="pill">{post.engagementEstimate}% fit</span>
+      </div>
+      <strong>{post.title}</strong>
+      <textarea value={post.content} onChange={(event) => updatePost(post.id, event.target.value)} rows={6} />
+      <div className="button-row">
+        <button className="ghost-button" onClick={() => void copyPost()} type="button">
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <button className="ghost-button" onClick={() => updatePost(post.id, `${post.content} Updated with a sharper call to action.`)} type="button">
+          Regenerate
+        </button>
+      </div>
+    </article>
+  )
+}
+
+function PlatformSelector({
+  selected,
+  togglePlatform,
+}: {
+  selected: PlatformName[]
+  togglePlatform: (platform: PlatformName) => void
+}) {
+  return (
+    <div className="selector-group">
+      <span>Platforms</span>
+      <div className="platform-cloud">
+        {platformNames.map((platform) => (
+          <button
+            className={selected.includes(platform) ? 'platform-chip selected' : 'platform-chip'}
+            key={platform}
+            onClick={() => togglePlatform(platform)}
+            type="button"
+          >
+            {platform}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <article className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  )
+}
+
+function ProgressBar({ value }: { value: number }) {
+  return (
+    <div className="progress" aria-label={`${value}% complete`}>
+      <span style={{ width: `${value}%` }} />
+    </div>
+  )
+}
+
+function BarChart({ points }: { points: { label: string; value: number }[] }) {
+  const max = useMemo(() => Math.max(...points.map((point) => point.value), 1), [points])
+  return (
+    <div className="bar-chart">
+      {points.map((point) => (
+        <div className="bar-column" key={point.label}>
+          <span style={{ height: `${(point.value / max) * 100}%` }} />
+          <small>{point.label}</small>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PlatformComparison({ analytics }: { analytics: Analytics }) {
+  const max = Math.max(...analytics.platforms.map((platform) => platform.engagement), 1)
+  return (
+    <div className="comparison-list">
+      {analytics.platforms.map((platform) => (
+        <div className="comparison-row" key={platform.platform}>
+          <div>
+            <strong>{platform.platform}</strong>
+            <small>{platform.growth}% growth</small>
+          </div>
+          <ProgressBar value={(platform.engagement / max) * 100} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('en', { notation: value > 9999 ? 'compact' : 'standard' }).format(value)
+}
+
+function sum(values: number[]) {
+  return values.reduce((total, value) => total + value, 0)
+}
+
 export default App
