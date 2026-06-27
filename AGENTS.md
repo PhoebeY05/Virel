@@ -1,6 +1,6 @@
 ## Ethical + Platform Reality (Account Strategy)
 
-LaunchFlow creates official project-branded accounts (e.g. @StudySnapAI) for each student project so that marketing is consistent, professional, and separated from personal identities.
+Virel creates official project-branded accounts (e.g. @StudySnapAI) for each student project so that marketing is consistent, professional, and separated from personal identities.
 
 These accounts become the central identity of the project across platforms.
 
@@ -8,9 +8,9 @@ These accounts become the central identity of the project across platforms.
 
 ## Feasibility Approach: Browser-Automated Setup Assistant
 
-LaunchFlow uses a guided browser automation system (e.g. Playwright-based assistant) to streamline account creation across platforms.
+Virel uses a guided browser automation system (e.g. Playwright-based assistant) to streamline account creation across platforms.
 
-Instead of fully autonomous “bot creation”, LaunchFlow functions as a co-pilot for account setup, where the user remains in control.
+Instead of fully autonomous “bot creation”, Virel functions as a co-pilot for account setup, where the user remains in control.
 
 The system:
 
@@ -80,7 +80,7 @@ This ensures Virel remains:
 
 ## Final Product Positioning
 
-LaunchFlow is not a bot or account generator.
+Virel is not a bot or account generator.
 
 It is a launch infrastructure tool for student projects, combining:
 
@@ -93,4 +93,4 @@ It is a launch infrastructure tool for student projects, combining:
 
 ## Key Insight
 
-LaunchFlow removes the friction of launching a project online by acting as a setup + marketing layer, while keeping users fully in control of account creation and complying with platform verification requirements.
+Virel removes the friction of launching a project online by acting as a setup + marketing layer, while keeping users fully in control of account creation and complying with platform verification requirements.
