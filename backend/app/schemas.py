@@ -299,8 +299,10 @@ class AnalyticsPoint(APIModel):
     likes: int
     comments: int
     shares: int
-    ctr: float
-    clicks: int
+    views: int = 0
+    followers: int = 0
+    ctr: float = 0.0
+    clicks: int = 0
 
 
 class PlatformStatsRead(APIModel):
@@ -308,8 +310,10 @@ class PlatformStatsRead(APIModel):
     likes: int
     comments: int
     shares: int
-    clicks: int
-    ctr: float
+    views: int = 0
+    followers: int = 0
+    clicks: int = 0
+    ctr: float = 0.0
     engagement: int
     posts: int
 
@@ -321,8 +325,9 @@ class TopPostStatsRead(APIModel):
     likes: int
     comments: int
     shares: int
-    clicks: int
-    ctr: float
+    views: int = 0
+    clicks: int = 0
+    ctr: float = 0.0
     engagement: int
     scheduled_at: datetime | None = None
 
@@ -331,8 +336,10 @@ class AnalyticsSummary(APIModel):
     likes: int
     comments: int
     shares: int
-    ctr: float
-    clicks: int
+    views: int = 0
+    followers: int = 0
+    ctr: float = 0.0
+    clicks: int = 0
     engagement: int
     best_platform: str
     engagement_timeline: list[AnalyticsPoint]

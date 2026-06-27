@@ -76,6 +76,8 @@ export interface ApiAnalytics {
   likes: number
   comments: number
   shares: number
+  views: number
+  followers: number
   clicks: number
   ctr: number
   engagement: number
@@ -87,6 +89,8 @@ export interface ApiAnalytics {
     likes: number
     comments: number
     shares: number
+    views: number
+    followers: number
     clicks: number
     ctr: number
   }[]
@@ -95,6 +99,8 @@ export interface ApiAnalytics {
     likes: number
     comments: number
     shares: number
+    views: number
+    followers: number
     clicks: number
     ctr: number
     engagement: number
@@ -199,7 +205,7 @@ export function fromApiProject(project: ApiProject): Project {
   return {
     id: project.id,
     name: project.name,
-    tagline: project.description || project.goal || 'Launch-ready student project.',
+    tagline: project.description || project.goal || '',
     status: fromApiProjectStatus(project.status),
     platforms: [],
     progress: project.status?.toLowerCase() === 'launched' ? 94 : project.status?.toLowerCase() === 'active' ? 72 : 38,
@@ -224,7 +230,7 @@ export function fromApiCampaign(campaign: ApiCampaign): Campaign {
     id: campaign.id,
     projectId: campaign.project_id,
     name: campaign.title,
-    audience: campaign.summary || campaign.tone || 'Student launch audience',
+    audience: campaign.summary || campaign.goal,
     goal: campaign.goal,
     platforms: (campaign.platforms ?? []).map(toPlatformName),
     status: fromApiCampaignStatus(campaign.status),
@@ -287,6 +293,8 @@ export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
     likes: point.likes,
     comments: point.comments,
     shares: point.shares,
+    views: point.views ?? 0,
+    followers: point.followers ?? 0,
     ctr: toPercent(point.ctr),
   }))
   const platforms = analytics.platforms.map((platform) => ({
@@ -294,6 +302,8 @@ export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
     likes: platform.likes,
     comments: platform.comments,
     shares: platform.shares,
+    views: platform.views ?? 0,
+    followers: platform.followers ?? 0,
     clicks: platform.clicks,
     ctr: toPercent(platform.ctr),
     engagement: platform.engagement,
@@ -317,6 +327,8 @@ export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
       activeCampaigns: analytics.active_campaigns,
       totalProjects: analytics.total_projects,
       engagement: analytics.engagement,
+      views: analytics.views ?? 0,
+      followers: analytics.followers ?? 0,
       ctr: toPercent(analytics.ctr),
     },
     timeline,
@@ -333,7 +345,7 @@ export function fromApiPlatform(platform: ApiSupportedPlatform): Platform | null
     id: platform.slug,
     name,
     status: platform.requires_human_verification ? 'Needs verification' : 'Pending',
-    username: defaultUsername(name),
+    username: '',
     phoneRequired: platform.phone_required === 'required' || platform.phone_required === 'often',
     automation: fromApiAutomationLevel(platform.automation_level),
     notes: platform.notes,
@@ -410,7 +422,7 @@ function formatDate(value?: string) {
 }
 
 function formatTime(value?: string | null) {
-  return value ? value.slice(11, 16) : '09:00'
+  return value ? value.slice(11, 16) : ''
 }
 
 function formatDay(value: string) {

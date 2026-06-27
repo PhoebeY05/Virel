@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.generator import generate_campaign_plan, generate_reply, validate_plan
+from app.analytics.providers import AccountMetrics, AnalyticsAccount, collect_account_metrics
 from app.auth import CurrentUser
 from app.config import Settings
 from app.errors import AppError
@@ -708,19 +709,36 @@ def _build_summary(
         likes=likes,
         comments=comments,
         shares=shares,
-        ctr=ctr,
-        clicks=clicks,
+        views=views,
+        followers=followers,
         engagement=engagement,
-        best_platform=best_platform,
+        best_platform=platforms[0].platform if platforms else "n/a",
         engagement_timeline=timeline,
         active_campaigns=active_campaigns,
         total_projects=total_projects,
-        platforms=platform_stats,
-        top_posts=top_posts,
+        platforms=platforms,
+        top_posts=[],
     )
 
 
-def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
+def _load_campaigns_for_user(session: Session, user_id: str) -> list[Campaign]:
+    return list(
+        session.scalars(
+            select(Campaign)
+            .join(Campaign.project)
+            .options(selectinload(Campaign.days).selectinload(CampaignDay.posts))
+            .where(Project.user_id == user_id)
+            .order_by(Campaign.created_at.desc())
+        )
+    )
+
+
+def summarize_campaign(
+    session: Session,
+    settings: Settings,
+    campaign_id: str,
+    user_id: str,
+) -> AnalyticsDetail:
     campaign = ensure_campaign(session, campaign_id, user_id)
     snapshots = list(
         session.scalars(
@@ -738,7 +756,12 @@ def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> Anal
     )
 
 
-def summarize_project(session: Session, project_id: str, user_id: str) -> AnalyticsDetail:
+def summarize_project(
+    session: Session,
+    settings: Settings,
+    project_id: str,
+    user_id: str,
+) -> AnalyticsDetail:
     project = ensure_owned_project(session, project_id, user_id)
     campaigns = list(
         session.scalars(
@@ -756,7 +779,7 @@ def summarize_project(session: Session, project_id: str, user_id: str) -> Analyt
     )
     return _build_summary(
         project_id=project.id,
-        campaign_id=None,
+        active_campaigns=sum(1 for campaign in campaigns if campaign.status.lower() in {"draft", "scheduled", "live"}),
         total_projects=1,
         active_campaigns=_count_active_campaigns(campaigns),
         snapshots=snapshots,
@@ -783,8 +806,8 @@ def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
     )
 
 
-def list_platform_stats(session: Session, user_id: str) -> list[PlatformStatsRead]:
-    return summarize_all(session, user_id).platforms
+def list_platform_stats(session: Session, settings: Settings, user_id: str) -> list[PlatformStatsRead]:
+    return summarize_all(session, settings, user_id).platforms
 
 
 def list_supported_platforms() -> list[dict[str, object]]:

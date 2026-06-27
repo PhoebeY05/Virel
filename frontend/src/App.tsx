@@ -1,9 +1,12 @@
+import type { ChangeEvent, FormEvent, ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowRight,
   BadgeCheck,
-  BarChart3,
+  ChartColumn,
   ChevronRight,
+  CircleDashed,
   ExternalLink,
   FolderKanban,
   Globe2,
@@ -18,14 +21,22 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  UserRoundPlus,
   WandSparkles,
 } from 'lucide-react'
-import type { ChangeEvent, FormEvent, ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
 import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
-import { connectAutomation, getAutomationSessions, getPlatforms, resumeAutomationSession, startAutomationSmokeBatch } from './services/automation'
+import {
+  connectAutomation,
+  createAutomationSession,
+  getAutomationSessions,
+  getPlatforms,
+  launchAutomationSignup,
+  launchPublishBatch,
+  resumeAutomationSession,
+  startAutomationSmokeBatch,
+} from './services/automation'
 import { createProjectAccount, getProjectAccounts, type AccountInput } from './services/accounts'
 import { generateCampaign, getCampaign, getCampaigns, updateCampaign, type GenerateCampaignInput } from './services/campaigns'
 import { uploadImage } from './services/media'
@@ -117,7 +128,18 @@ const paperCard =
 const insetCard =
   'rounded-[26px] border-[2px] border-[#2c211b] bg-[rgba(255,252,248,0.9)] shadow-[8px_8px_18px_rgba(45,33,26,0.06)]'
 const buttonBase =
-  'inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition active:translate-y-[1px]'
+  'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/40'
+const primaryButton = `${buttonBase} bg-emerald-400 text-slate-950 hover:bg-emerald-300`
+const secondaryButton = `${buttonBase} border border-white/10 bg-white/5 text-slate-100 hover:border-white/20 hover:bg-white/10`
+const ghostButton = `${buttonBase} border border-transparent bg-transparent text-slate-300 hover:bg-white/5 hover:text-white`
+const cardClass = 'rounded-[28px] border border-white/10 bg-slate-950/75 p-6 shadow-[0_18px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl'
+
+const automationGuidance: Partial<Record<PlatformName, string>> = {
+  LinkedIn: 'LinkedIn account setup is guidance-only because identity and verification checks are strongly enforced.',
+  Xiaohongshu: 'Xiaohongshu generally requires phone-based regional verification, so Virel keeps this as guided setup.',
+}
+
+const unsupportedSignupPlatforms: PlatformName[] = ['LinkedIn', 'Xiaohongshu']
 
 function App() {
   const [view, setView] = useState<View>('Dashboard')
@@ -833,26 +855,34 @@ function CampaignsView() {
   const projectsState = useAsync(getProjects)
   const campaignsState = useAsync(getCampaigns)
   const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [goal, setGoal] = useState('Drive signups and demo requests')
+  const [goal, setGoal] = useState('')
   const [tone, setTone] = useState('Confident')
   const [title, setTitle] = useState('')
-  const [platforms, setPlatforms] = useState<PlatformName[]>(platformNames.slice(0, 3))
+  const [platforms, setPlatforms] = useState<PlatformName[]>([])
   const [generatedCampaign, setGeneratedCampaign] = useState<Campaign | null>(null)
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [publishStatus, setPublishStatus] = useState<string | null>(null)
+  const [isPublishing, setIsPublishing] = useState(false)
 
   const projects = projectsState.data ?? []
   const campaigns = campaignsState.data ?? []
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
-  const previewCampaign = generatedCampaign ?? campaigns[0]
+
+  const campaignPreview = generatedCampaign ?? campaigns[0]
 
   async function handleGenerate() {
     if (!selectedProject || platforms.length === 0) return
     setActionError(null)
     try {
+      const campaignGoal = goal || selectedProject.goal
+      if (!campaignGoal) {
+        setActionError('Add a campaign goal before generating.')
+        return
+      }
       const payload: GenerateCampaignInput = {
         projectId: selectedProject.id,
-        goal,
+        goal: campaignGoal,
         platforms,
         tone,
         title: title || `${selectedProject.name} launch campaign`,
@@ -886,6 +916,31 @@ function CampaignsView() {
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Campaign update failed.')
       throw error
+    }
+  }
+
+  async function handlePublishAssistant() {
+    if (!campaignPreview || !selectedProject || campaignPreview.posts.length === 0) return
+
+    setActionError(null)
+    setPublishStatus('Starting multi-platform publishing assistant...')
+    setIsPublishing(true)
+
+    try {
+      const result = await launchPublishBatch({
+        projectId: selectedProject.id,
+        displayName: selectedProject.name,
+        username: normalizeHandle(selectedProject.name),
+        bio: selectedProject.description || selectedProject.tagline,
+        websiteUrl: selectedProject.demoUrl ?? selectedProject.repoUrl ?? undefined,
+        posts: campaignPreview.posts,
+      })
+      setPublishStatus(`${result.message} PID: ${result.pid}${result.logPath ? ` Log: ${result.logPath}` : ''}`)
+    } catch (error) {
+      setPublishStatus(null)
+      setActionError(error instanceof Error ? error.message : 'Publishing assistant failed to start.')
+    } finally {
+      setIsPublishing(false)
     }
   }
 
@@ -955,7 +1010,7 @@ function CampaignsView() {
 
               <PlatformChooser selected={platforms} onToggle={togglePlatform} />
 
-                <button className={`${buttonBase} border-[2px] border-[#2c211b] bg-[#2c211b] text-[#fffaf4] shadow-[6px_6px_16px_rgba(45,33,26,0.06)] hover:bg-[#3a2d24]`} onClick={() => void handleGenerate()} type="button">
+              <button className={primaryButton} onClick={() => void handleGenerate()} type="button">
                 <Sparkles className="h-4 w-4" />
                 Generate campaign
               </button>
@@ -969,34 +1024,34 @@ function CampaignsView() {
               eyebrow="Preview"
               title="Campaign reel"
               action={
-                previewCampaign ? (
-                  <DashboardAction onClick={() => setEditingCampaign(previewCampaign)} tone="coral">
+                campaignPreview ? (
+                  <DashboardAction onClick={() => setEditingCampaign(campaignPreview)} tone="coral">
                     <PencilLine className="h-4 w-4" />
                     Edit campaign
                   </DashboardAction>
                 ) : undefined
               }
             />
-            {previewCampaign ? (
+            {campaignPreview ? (
               <div className="mt-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-display text-3xl font-black tracking-tight text-[#1f1814]">{previewCampaign.name}</h3>
+                    <h3 className="font-display text-3xl font-black tracking-tight text-[#1f1814]">{campaignPreview.name}</h3>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-[#51463f]">
-                      {previewCampaign.summary || previewCampaign.audience || previewCampaign.goal}
+                      {campaignPreview.summary || campaignPreview.audience || campaignPreview.goal}
                     </p>
                   </div>
-                  <StatusBadge status={previewCampaign.status} />
+                  <StatusBadge status={campaignPreview.status} />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <MiniStat label="Project" value={selectedProject.name} />
-                  <MiniStat label="Platforms" value={previewCampaign.platforms.join(', ') || 'Not set'} />
-                  <MiniStat label="Tone" value={previewCampaign.tone || tone} />
+                  <MiniStat label="Platforms" value={campaignPreview.platforms.join(', ') || 'Not set'} />
+                  <MiniStat label="Tone" value={campaignPreview.tone || tone} />
                 </div>
 
                 <div className="grid gap-3">
-                  {previewCampaign.days.slice(0, 3).map((day) => (
+                  {campaignPreview.days.slice(0, 3).map((day) => (
                     <div key={day.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Phase {day.day}</p>
@@ -1010,26 +1065,44 @@ function CampaignsView() {
                   ))}
                 </div>
 
-                {previewCampaign.posts.length > 0 && (
+                {campaignPreview.posts.length > 0 && (
                   <div className="rounded-[28px] border-[2px] border-dashed border-[#2c211b] bg-[#f7fff9] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#7ea8ff]">Live first post</p>
                         <p className="mt-1 text-sm leading-6 text-[#5f554a]">The first generated post is published immediately. The rest stay available for review below.</p>
                       </div>
-                      <StatusBadge status={previewCampaign.posts[0].status} />
+                      <StatusBadge status={campaignPreview.posts[0].status} />
                     </div>
                     <div className="mt-4">
-                      <CampaignPostCard post={previewCampaign.posts[0]} />
+                      <CampaignPostCard post={campaignPreview.posts[0]} />
                     </div>
                   </div>
                 )}
+                <div className="flex flex-wrap gap-2">
+                  <button className={secondaryButton} onClick={() => setGeneratedCampaign(campaignPreview)} type="button">
+                    Keep preview
+                  </button>
+                  <button
+                    className={secondaryButton}
+                    disabled={isPublishing || campaignPreview.posts.length === 0}
+                    onClick={() => void handlePublishAssistant()}
+                    type="button"
+                  >
+                    {isPublishing ? 'Starting assistant...' : 'Publish assistant'}
+                  </button>
+                  <button className={ghostButton} onClick={() => setTitle('')} type="button">
+                    Reset title
+                  </button>
+                </div>
+                {publishStatus && <p className="text-sm font-medium text-[#1f1814]">{publishStatus}</p>}
               </div>
             ) : (
               <EmptyState title="No campaign yet." description="Generate one to see the plan expand." compact />
             )}
           </div>
         </div>
+        {actionError && <p className="mt-4 text-sm text-rose-300">{actionError}</p>}
       </section>
 
       <section className={`${paperCard} p-6 sm:p-7`}>
@@ -1205,7 +1278,7 @@ function AnalyticsView() {
     return <EmptyState title="No real analytics yet." description="Analytics will appear after published posts generate tracked engagement." />
   }
 
-  const topPosts = analytics.topPosts.slice(0, 4)
+  const recentPosts = analytics.topPosts.slice(0, 4)
 
   return (
     <div className="space-y-6">
@@ -1218,8 +1291,8 @@ function AnalyticsView() {
         <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricTile label="Projects" value={analytics.summary.totalProjects.toString()} icon={FolderKanban} tone="blue" />
           <MetricTile label="Campaigns" value={analytics.summary.activeCampaigns.toString()} icon={Sparkles} tone="yellow" />
-          <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={BarChart3} tone="green" />
-          <MetricTile label="CTR" value={`${analytics.summary.ctr}%`} icon={LineChart} tone="purple" />
+          <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={ChartColumn} tone="green" />
+          <MetricTile label="Views" value={formatNumber(analytics.summary.views)} icon={LineChart} tone="purple" />
         </div>
       </section>
 
@@ -1257,7 +1330,8 @@ function AnalyticsView() {
                   <p>{formatNumber(platform.likes)} likes</p>
                   <p>{formatNumber(platform.comments)} comments</p>
                   <p>{formatNumber(platform.shares)} shares</p>
-                  <p>{formatNumber(platform.clicks)} clicks</p>
+                  <p>{formatNumber(platform.views)} views</p>
+                  <p>{formatNumber(platform.followers)} followers</p>
                 </div>
               </div>
             ))}
@@ -1276,24 +1350,305 @@ function AnalyticsView() {
           </div>
         </article>
 
-        <article className={`${paperCard} p-6 sm:p-7`}>
+        <article className={cardClass}>
           <SectionHeader eyebrow="Recent posts" title="Generated content" />
-          {topPosts.length === 0 ? (
-            <EmptyState title="No posts yet." description="Create a campaign to see posts fill this area." compact />
+          {recentPosts.length === 0 ? (
+            <EmptyState title="No generated posts yet." description="Create a campaign to see posts here." compact />
           ) : (
             <div className="mt-5 grid gap-3">
-              {topPosts.map((post) => (
-                <div key={post.id} className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 break-words font-black text-[#1f1814]">{post.title}</span>
-                    <span className="shrink-0 rounded-full border-[2px] border-[#2c211b] bg-[#fff0bc] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
-                      {post.platform}
-                    </span>
+              {recentPosts.map((post) => (
+                <div key={post.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium text-white">{post.title}</span>
+                    <StatusBadge status={post.platform} />
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-[#5f554a]">
-                    {formatNumber(post.likes)} likes · {formatNumber(post.comments)} comments · {formatNumber(post.clicks)} clicks
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {formatNumber(post.likes)} likes, {formatNumber(post.comments)} comments, {formatNumber(post.shares)} shares
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                    <span>{post.platform}</span>
+                    <span>•</span>
+                    <span>{formatNumber(post.engagement)} engagement</span>
+                  </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+    </div>
+  )
+}
+
+function AutomationView() {
+  const platformsState = useAsync(getPlatforms)
+  const projectsState = useAsync(getProjects)
+  const [selectedPlatformId, setSelectedPlatformId] = useState('')
+  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [username, setUsername] = useState('@studysnapai')
+  const [bio, setBio] = useState('Study smarter, not harder.')
+  const [profileImageUrl, setProfileImageUrl] = useState('')
+  const [accountUrl, setAccountUrl] = useState('')
+  const [notes, setNotes] = useState('')
+  const [signupEmail, setSignupEmail] = useState('')
+  const [signupPassword, setSignupPassword] = useState('')
+  const [sessions, setSessions] = useState<AutomationSession[]>([])
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [launchStatus, setLaunchStatus] = useState<string | null>(null)
+  const [isLaunching, setIsLaunching] = useState(false)
+
+  const platforms = platformsState.data ?? []
+  const projects = projectsState.data ?? []
+  const selectedPlatform = platforms.find((platform) => platform.id === selectedPlatformId) ?? platforms[0]
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
+  const guidance = selectedPlatform ? automationGuidance[selectedPlatform.name] : null
+  const signupUnsupported = selectedPlatform ? unsupportedSignupPlatforms.includes(selectedPlatform.name) : false
+  const resolvedUsername = selectedProject ? username || normalizeHandle(selectedProject.name) : username
+  const resolvedBio = selectedProject ? bio || selectedProject.description || selectedProject.tagline || selectedProject.goal : bio
+  const resolvedWebsiteUrl = selectedProject?.demoUrl ?? selectedProject?.repoUrl ?? undefined
+
+  async function handleRequestConnection() {
+    if (!selectedProject || !selectedPlatform) return
+    setSessionError(null)
+    try {
+      const session = await connectAutomation({
+        projectId: selectedProject.id,
+        platform: selectedPlatform.name,
+        payload: {
+          username: resolvedUsername,
+          bio: resolvedBio,
+          profile_image_url: profileImageUrl,
+          account_url: accountUrl,
+          notes,
+        },
+      })
+      setSessions((current) => [session, ...current])
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : 'Automation connect failed.')
+    }
+  }
+
+  async function handleQueueSession() {
+    if (!selectedProject || !selectedPlatform) return
+    setSessionError(null)
+    try {
+      const session = await createAutomationSession({
+        projectId: selectedProject.id,
+        platform: selectedPlatform.name,
+        status: 'queued',
+        step: 'draft_created',
+        progress: 12,
+        payload: {
+          username: resolvedUsername,
+          bio: resolvedBio,
+          profile_image_url: profileImageUrl,
+          account_url: accountUrl,
+          notes,
+        },
+      })
+      setSessions((current) => [session, ...current])
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : 'Automation session creation failed.')
+    }
+  }
+
+  async function handleLaunchSignupPrefill() {
+    if (!selectedProject || !selectedPlatform || signupUnsupported) {
+      if (guidance) setLaunchStatus(guidance)
+      return
+    }
+
+    setSessionError(null)
+    setLaunchStatus('Starting signup prefill assistant...')
+    setIsLaunching(true)
+
+    try {
+      const session = await createAutomationSession({
+        projectId: selectedProject.id,
+        platform: selectedPlatform.name,
+        status: 'running',
+        step: 'signup_prefill_browser_started',
+        progress: 20,
+        payload: {
+          signup_method: 'email',
+          email: signupEmail,
+          username: resolvedUsername,
+          display_name: selectedProject.name,
+          bio: resolvedBio,
+          profile_image_url: profileImageUrl,
+          account_url: accountUrl,
+          website_url: resolvedWebsiteUrl,
+          notes,
+        },
+      })
+      setSessions((current) => [session, ...current])
+
+      const launch = await launchAutomationSignup({
+        projectId: selectedProject.id,
+        platform: selectedPlatform.name,
+        email: signupEmail || undefined,
+        password: signupPassword || undefined,
+        username: resolvedUsername,
+        displayName: selectedProject.name,
+        bio: resolvedBio,
+        websiteUrl: resolvedWebsiteUrl,
+        profileImagePath: profileImageUrl || undefined,
+        signupMethod: 'email',
+        holdMs: 300000,
+      })
+
+      setLaunchStatus(`${launch.message} PID: ${launch.pid}${launch.logPath ? ` Log: ${launch.logPath}` : ''}`)
+    } catch (error) {
+      setLaunchStatus(null)
+      setSessionError(error instanceof Error ? error.message : 'Signup prefill launch failed.')
+    } finally {
+      setIsLaunching(false)
+    }
+  }
+
+  if (platformsState.isLoading || projectsState.isLoading) return <LoadingGrid />
+  if (platformsState.error) return <ErrorState title="Automation catalog could not load." message={platformsState.error} retry={platformsState.retry} />
+  if (projectsState.error) return <ErrorState title="Projects are required for automation." message={projectsState.error} retry={projectsState.retry} />
+  if (!selectedPlatform || !selectedProject) return <EmptyState title="Create a project first" description="Automation sessions need a project and a supported platform." />
+
+  return (
+    <div className="space-y-6">
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader
+          eyebrow="Automation"
+          title="Guided setup, backed by the real API"
+          description="These requests create automation sessions on the backend. The browser automation layer can pick them up later."
+        />
+        <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="grid gap-3">
+            {platforms.map((platform, index) => (
+              <button
+                key={platform.id}
+                type="button"
+                onClick={() => setSelectedPlatformId(platform.id)}
+                className={`rounded-[26px] border-[2px] border-[#2c211b] px-4 py-4 text-left shadow-[6px_6px_16px_rgba(45,33,26,0.05)] transition hover:-translate-y-0.5 ${
+                  selectedPlatform.id === platform.id ? NAV_ITEMS[index % NAV_ITEMS.length].color + ' text-[#1f1814]' : 'bg-white text-[#1f1814]'
+                }`}
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 break-words font-black leading-tight">{platform.name}</span>
+                      <StatusBadge status={platform.status} />
+                    </div>
+                    <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4" />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-current/70">{platform.notes || platform.automation}</p>
+              </button>
+            ))}
+          </div>
+
+          <div className={cardClass}>
+            <SectionHeader
+              eyebrow="Connection brief"
+              title={`Setup ${selectedPlatform.name}`}
+              description="Fill in the brand details, then either queue the session or request a connect run."
+            />
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <Field label="Project to connect" description="Choose the project this account setup belongs to." className="sm:col-span-2">
+                <select className={inputField} value={selectedProject.id} onChange={(event) => setSelectedProjectId(event.target.value)}>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Username">
+                <input className={inputField} value={username} onChange={(event) => setUsername(event.target.value)} />
+              </Field>
+
+              <Field label="Account URL">
+                <input className={inputField} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
+              </Field>
+
+              <Field label="Signup email">
+                <input className={inputField} value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} />
+              </Field>
+
+              <Field label="Signup password">
+                <input
+                  className={inputField}
+                  type="password"
+                  value={signupPassword}
+                  onChange={(event) => setSignupPassword(event.target.value)}
+                />
+              </Field>
+
+              <Field label="Bio" className="sm:col-span-2">
+                <textarea className={textareaField} value={bio} onChange={(event) => setBio(event.target.value)} />
+              </Field>
+
+              <Field label="Profile image URL" className="sm:col-span-2">
+                <input
+                  className={inputField}
+                  value={profileImageUrl}
+                  onChange={(event) => setProfileImageUrl(event.target.value)}
+                  placeholder="https://..."
+                />
+              </Field>
+
+              <Field label="Setup notes" className="sm:col-span-2">
+                <textarea className={textareaField} value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </Field>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button className={primaryButton} onClick={() => void handleRequestConnection()} type="button">
+                <UserRoundPlus className="h-4 w-4" />
+                Request connect
+              </button>
+              <DashboardAction onClick={() => void handleQueueSession()} tone="coral">
+                <CircleDashed className="h-4 w-4" />
+                Queue session
+              </DashboardAction>
+              <DashboardAction onClick={() => void handleLaunchSignupPrefill()} tone="blue">
+                <ExternalLink className="h-4 w-4" />
+                {isLaunching ? 'Starting...' : 'Launch prefill'}
+              </DashboardAction>
+            </div>
+
+            {sessionError && <p className="mt-4 text-sm text-rose-300">{sessionError}</p>}
+            {launchStatus && <p className="mt-4 text-sm text-slate-200">{launchStatus}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[1.03fr_0.97fr]">
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Supported platforms" title="Supported platforms" />
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {platforms.map((platform) => (
+              <div key={platform.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <span className="min-w-0 break-words font-black leading-tight text-[#1f1814]">{platform.name}</span>
+                  <StatusBadge status={platform.status} />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-[#5f554a]">{platform.notes || platform.automation}</p>
+                <p className="mt-3 text-xs font-black uppercase tracking-[0.26em] text-[#6b625a]">
+                  {platform.phoneRequired ? 'Phone may be required' : 'Email-friendly'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Session log" title="Recent requests" />
+          {sessions.length === 0 ? (
+            <EmptyState title="No sessions yet." description="Request or queue a setup to see the session response here." compact />
+          ) : (
+            <div className="mt-5 space-y-3">
+              {sessions.map((session) => (
+                <SessionCard key={session.id} session={session} />
               ))}
             </div>
           )}
@@ -2301,6 +2656,27 @@ function statusTone(status: string) {
   return 'bg-white text-[#1f1814]'
 }
 
+function SessionCard({ session }: { session: AutomationSession }) {
+  return (
+    <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">{session.platform}</p>
+          <p className="mt-2 font-black text-[#1f1814]">{session.step}</p>
+        </div>
+        <StatusBadge status={session.status} />
+      </div>
+      <div className="mt-4">
+        <ProgressBar value={session.progress} />
+      </div>
+      <div className="mt-3 grid gap-2 text-sm text-[#5f554a] sm:grid-cols-2">
+        <p>Project: {session.projectId}</p>
+        <p>Updated: {formatDate(session.updatedAt)}</p>
+      </div>
+    </div>
+  )
+}
+
 function LoadingGrid() {
   return (
     <div className="grid gap-5">
@@ -2426,6 +2802,21 @@ const dangerLink =
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value)
+}
+
+function normalizeHandle(value: string) {
+  const handle = value.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24)
+  return handle ? `@${handle}` : ''
+}
+
+function calculateLaunchProgress(project: Project, campaigns: Campaign[], automationSessions: AutomationSession[]) {
+  const hasCampaign = campaigns.some((campaign) => campaign.projectId === project.id)
+  const hasAutomation = automationSessions.some((session) => session.projectId === project.id)
+  const baseProgress = Number.isFinite(project.progress) ? project.progress : 0
+  const statusProgress = project.status === 'Launched' ? 100 : project.status === 'Active' ? 45 : project.status === 'Paused' ? 35 : 15
+  const milestoneProgress = (hasCampaign ? 25 : 0) + (hasAutomation ? 25 : 0)
+
+  return Math.min(100, Math.max(baseProgress, statusProgress + milestoneProgress))
 }
 
 function formatDate(value?: string) {

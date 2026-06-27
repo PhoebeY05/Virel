@@ -18,11 +18,16 @@ class Settings(BaseSettings):
     )
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
+    ayrshare_api_key: str | None = None
+    ayrshare_profile_key: str | None = None
+    scrapecreators_api_key: str | None = None
+    analytics_timeout_seconds: float = 8.0
+    analytics_cache_ttl_seconds: int = 900
     auth_enabled: bool = False
     clerk_jwks_url: str | None = None
-    demo_user_id: str = "demo-user"
-    demo_user_email: str = "demo@virel.local"
-    demo_user_name: str = "Demo User"
+    local_user_id: str = "local-user"
+    local_user_email: str = "local@virel.local"
+    local_user_name: str = "Local User"
 
     model_config = SettingsConfigDict(
         env_file=".env",

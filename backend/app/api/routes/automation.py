@@ -36,14 +36,17 @@ PlatformName = Literal[
 ]
 
 
-class AutomationSmokeRequest(BaseModel):
+class AutomationSignupPrefillRequest(BaseModel):
+    projectId: str = Field(alias="projectId")
     platform: PlatformName = "reddit"
-    signupMethod: Literal["email", "google"] = "google"
+    signupMethod: Literal["email", "google"] = "email"
     email: str | None = None
-    username: str = "vireltest"
+    username: str
     password: str | None = None
-    displayName: str = Field(default="Virel Test Project", alias="displayName")
-    bio: str | None = "Testing Virel's guided setup assistant."
+    displayName: str = Field(alias="displayName")
+    bio: str | None = None
+    websiteUrl: str | None = Field(default=None, alias="websiteUrl")
+    profileImagePath: str | None = Field(default=None, alias="profileImagePath")
     holdMs: int = 300_000
 
 
@@ -190,6 +193,82 @@ def start_automation_smoke_test(payload: AutomationSmokeRequest) -> dict[str, in
         "smoke",
         payload.model_dump_json(by_alias=True),
         log_prefix="smoke",
+    )
+
+    return {
+        "status": "started",
+        "pid": pid,
+        "platform": payload.platform,
+        "logPath": str(log_path),
+        "message": "Signup prefill assistant started. Review the opened form, fill missing verification details, and submit manually.",
+    }
+
+
+@router.post("/automation/publish-batch")
+def start_publish_batch(payload: AutomationPublishBatchRequest) -> dict[str, int | str]:
+    automation_dir = _automation_dir()
+
+    command = [
+        "npm.cmd" if os.name == "nt" else "npm",
+        "run",
+        "publish-batch",
+        "--",
+        payload.model_dump_json(by_alias=True),
+    ]
+
+    pid, log_path = _start_automation_process(command, automation_dir, "publish", "publishing assistant")
+
+    return {
+        "status": "started",
+        "pid": pid,
+        "logPath": str(log_path),
+        "message": "Publishing assistant started. Review each opened composer and publish manually when ready.",
+    }
+
+
+@router.post("/automation/test-setup/batch")
+def start_automation_smoke_batch(payload: AutomationSmokeBatchRequest) -> dict[str, object]:
+    automation_dir = resolve_automation_dir()
+    if automation_dir is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Automation directory was not found. Set VIREL_AUTOMATION_DIR to the local automation folder if the backend is running elsewhere.",
+        )
+
+    if not payload.runs:
+        raise HTTPException(status_code=422, detail="At least one platform run is required.")
+
+    process, log_path = _spawn_automation_run(
+        automation_dir,
+        "smoke-batch",
+        payload.model_dump_json(by_alias=True),
+        log_prefix="smoke-batch",
+    )
+
+    return {
+        "status": "started",
+        "pid": process.pid,
+        "platforms": [run.platform for run in payload.runs],
+        "count": len(payload.runs),
+        "logPath": str(log_path),
+        "message": "A headed browser will open each selected platform in sequence. Complete verification manually in the browser.",
+    }
+
+
+@router.post("/automation/resume-session")
+def start_automation_resume_session(payload: AutomationResumeRequest) -> dict[str, int | str]:
+    automation_dir = resolve_automation_dir()
+    if automation_dir is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Automation directory was not found. Set VIREL_AUTOMATION_DIR to the local automation folder if the backend is running elsewhere.",
+        )
+
+    process, log_path = _spawn_automation_run(
+        automation_dir,
+        "resume-from-backend",
+        payload.model_dump_json(by_alias=True),
+        log_prefix="resume-session",
     )
 
     return {
