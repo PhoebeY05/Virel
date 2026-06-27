@@ -1,0 +1,173 @@
+# ==========================================
+# OS Files
+# ==========================================
+
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Environment Variables
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Node.js
+# ==========================================
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# Next.js
+# ==========================================
+
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel/
+frontend/coverage/
+
+# ==========================================
+# Python
+# ==========================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+backend/.venv/
+backend/venv/
+backend/env/
+
+# ==========================================
+# FastAPI
+# ==========================================
+
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/htmlcov/
+backend/.coverage
+backend/.coverage.*
+backend/coverage.xml
+
+# ==========================================
+# Alembic
+# ==========================================
+
+# Keep migrations under version control.
+# Only ignore cache.
+backend/alembic/__pycache__/
+
+# ==========================================
+# Playwright
+# ==========================================
+
+automation/node_modules/
+automation/playwright-report/
+automation/test-results/
+
+# Browser session storage
+automation/sessions/
+automation/storage-state/
+
+# Screenshots & videos
+automation/screenshots/
+automation/videos/
+automation/traces/
+
+# Downloads
+automation/downloads/
+
+# ==========================================
+# Logs
+# ==========================================
+
+*.log
+logs/
+*.pid
+
+# ==========================================
+# IDEs
+# ==========================================
+
+.vscode/
+.idea/
+
+# JetBrains
+*.iml
+
+# ==========================================
+# Docker
+# ==========================================
+
+*.tar
+
+# ==========================================
+# Database
+# ==========================================
+
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# Build Artifacts
+# ==========================================
+
+dist/
+build/
+coverage/
+
+# ==========================================
+# Temporary Files
+# ==========================================
+
+tmp/
+temp/
+.cache/
+
+# ==========================================
+# Misc
+# ==========================================
+
+*.swp
+*.swo
+*.bak
+
+# ==========================================
+# Generated Media (Optional)
+# ==========================================
+
+generated/
+uploads/
+exports/
+
+# ==========================================
+# Secrets
+# ==========================================
+
+*.pem
+*.key
+*.crt
+*.p12
+
+# ==========================================
+# Mac Resource Forks
+# ==========================================
+
+._*
+
+# ==========================================
+# Keep Important Files
+# ==========================================
+
+!README.md
+!docker-compose.yml
