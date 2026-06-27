@@ -165,7 +165,11 @@ const slugToName: Record<string, PlatformName> = {
   tiktok: 'TikTok',
   x: 'X',
   facebook: 'Facebook',
+  xiaohongshu: 'Xiaohongshu',
   telegram: 'Telegram',
+  product_hunt: 'Product Hunt',
+  hacker_news: 'Hacker News',
+  discord: 'Discord',
 }
 
 const nameToSlug = Object.fromEntries(
@@ -431,12 +435,6 @@ function formatDay(value: string) {
 
 function toPercent(value: number) {
   return value <= 1 ? Number((value * 100).toFixed(1)) : value
-}
-
-function defaultUsername(platform: PlatformName) {
-  if (platform === 'Reddit') return 'u/VirelHQ'
-  if (platform === 'LinkedIn') return 'Virel'
-  return '@virel'
 }
 
 function toPlatformAccountStatus(value: string): PlatformAccountStatus {

@@ -6,7 +6,6 @@ import {
   BadgeCheck,
   ChartColumn,
   ChevronRight,
-  CircleDashed,
   ExternalLink,
   FolderKanban,
   Globe2,
@@ -21,7 +20,6 @@ import {
   Sparkles,
   Trash2,
   Upload,
-  UserRoundPlus,
   WandSparkles,
 } from 'lucide-react'
 import { platformNames } from './constants/platforms'
@@ -29,10 +27,8 @@ import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
 import {
   connectAutomation,
-  createAutomationSession,
   getAutomationSessions,
   getPlatforms,
-  launchAutomationSignup,
   launchPublishBatch,
   resumeAutomationSession,
   startAutomationSmokeBatch,
@@ -763,10 +759,11 @@ function buildProjectLaunchContext(project: Project, settings: UserSettings | nu
   const username = normalizeAutomationUsername(project.name, platform)
   const displayName = project.name
   const bio = trimToLength(project.description || project.goal || project.targetAudience || project.tagline, 500)
-  const accountUrl = resolvePlatformUrl(platform, null, project, settings)
+  const accountUrl = resolvePlatformUrl(platform, null, project)
   const email = settings?.supportEmail || settings?.backupEmail || settings?.googleAccountEmail || undefined
   const websiteUrl = settings?.websiteUrl || project.demoUrl || project.repoUrl || ''
-  const signupMethod = settings?.googleLinkStatus === 'Linked' && settings.googleAccountEmail ? 'google' : 'email'
+  const signupMethod: 'email' | 'google' =
+    settings?.googleLinkStatus === 'Linked' && settings.googleAccountEmail ? 'google' : 'email'
 
   return {
     platform,
@@ -815,10 +812,6 @@ function buildProjectLaunchContext(project: Project, settings: UserSettings | nu
       signup_method: signupMethod,
     },
   }
-}
-
-function buildGuidedAutomationPayload(project: Project, settings: UserSettings | null, platform: PlatformName) {
-  return buildProjectLaunchContext(project, settings, platform).automationPayload
 }
 
 function buildPlatformAccountInput(project: Project, settings: UserSettings | null, platform: PlatformName) {
@@ -1381,284 +1374,6 @@ function AnalyticsView() {
 }
 
 function AutomationView() {
-  const platformsState = useAsync(getPlatforms)
-  const projectsState = useAsync(getProjects)
-  const [selectedPlatformId, setSelectedPlatformId] = useState('')
-  const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [username, setUsername] = useState('@studysnapai')
-  const [bio, setBio] = useState('Study smarter, not harder.')
-  const [profileImageUrl, setProfileImageUrl] = useState('')
-  const [accountUrl, setAccountUrl] = useState('')
-  const [notes, setNotes] = useState('')
-  const [signupEmail, setSignupEmail] = useState('')
-  const [signupPassword, setSignupPassword] = useState('')
-  const [sessions, setSessions] = useState<AutomationSession[]>([])
-  const [sessionError, setSessionError] = useState<string | null>(null)
-  const [launchStatus, setLaunchStatus] = useState<string | null>(null)
-  const [isLaunching, setIsLaunching] = useState(false)
-
-  const platforms = platformsState.data ?? []
-  const projects = projectsState.data ?? []
-  const selectedPlatform = platforms.find((platform) => platform.id === selectedPlatformId) ?? platforms[0]
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
-  const guidance = selectedPlatform ? automationGuidance[selectedPlatform.name] : null
-  const signupUnsupported = selectedPlatform ? unsupportedSignupPlatforms.includes(selectedPlatform.name) : false
-  const resolvedUsername = selectedProject ? username || normalizeHandle(selectedProject.name) : username
-  const resolvedBio = selectedProject ? bio || selectedProject.description || selectedProject.tagline || selectedProject.goal : bio
-  const resolvedWebsiteUrl = selectedProject?.demoUrl ?? selectedProject?.repoUrl ?? undefined
-
-  async function handleRequestConnection() {
-    if (!selectedProject || !selectedPlatform) return
-    setSessionError(null)
-    try {
-      const session = await connectAutomation({
-        projectId: selectedProject.id,
-        platform: selectedPlatform.name,
-        payload: {
-          username: resolvedUsername,
-          bio: resolvedBio,
-          profile_image_url: profileImageUrl,
-          account_url: accountUrl,
-          notes,
-        },
-      })
-      setSessions((current) => [session, ...current])
-    } catch (error) {
-      setSessionError(error instanceof Error ? error.message : 'Automation connect failed.')
-    }
-  }
-
-  async function handleQueueSession() {
-    if (!selectedProject || !selectedPlatform) return
-    setSessionError(null)
-    try {
-      const session = await createAutomationSession({
-        projectId: selectedProject.id,
-        platform: selectedPlatform.name,
-        status: 'queued',
-        step: 'draft_created',
-        progress: 12,
-        payload: {
-          username: resolvedUsername,
-          bio: resolvedBio,
-          profile_image_url: profileImageUrl,
-          account_url: accountUrl,
-          notes,
-        },
-      })
-      setSessions((current) => [session, ...current])
-    } catch (error) {
-      setSessionError(error instanceof Error ? error.message : 'Automation session creation failed.')
-    }
-  }
-
-  async function handleLaunchSignupPrefill() {
-    if (!selectedProject || !selectedPlatform || signupUnsupported) {
-      if (guidance) setLaunchStatus(guidance)
-      return
-    }
-
-    setSessionError(null)
-    setLaunchStatus('Starting signup prefill assistant...')
-    setIsLaunching(true)
-
-    try {
-      const session = await createAutomationSession({
-        projectId: selectedProject.id,
-        platform: selectedPlatform.name,
-        status: 'running',
-        step: 'signup_prefill_browser_started',
-        progress: 20,
-        payload: {
-          signup_method: 'email',
-          email: signupEmail,
-          username: resolvedUsername,
-          display_name: selectedProject.name,
-          bio: resolvedBio,
-          profile_image_url: profileImageUrl,
-          account_url: accountUrl,
-          website_url: resolvedWebsiteUrl,
-          notes,
-        },
-      })
-      setSessions((current) => [session, ...current])
-
-      const launch = await launchAutomationSignup({
-        projectId: selectedProject.id,
-        platform: selectedPlatform.name,
-        email: signupEmail || undefined,
-        password: signupPassword || undefined,
-        username: resolvedUsername,
-        displayName: selectedProject.name,
-        bio: resolvedBio,
-        websiteUrl: resolvedWebsiteUrl,
-        profileImagePath: profileImageUrl || undefined,
-        signupMethod: 'email',
-        holdMs: 300000,
-      })
-
-      setLaunchStatus(`${launch.message} PID: ${launch.pid}${launch.logPath ? ` Log: ${launch.logPath}` : ''}`)
-    } catch (error) {
-      setLaunchStatus(null)
-      setSessionError(error instanceof Error ? error.message : 'Signup prefill launch failed.')
-    } finally {
-      setIsLaunching(false)
-    }
-  }
-
-  if (platformsState.isLoading || projectsState.isLoading) return <LoadingGrid />
-  if (platformsState.error) return <ErrorState title="Automation catalog could not load." message={platformsState.error} retry={platformsState.retry} />
-  if (projectsState.error) return <ErrorState title="Projects are required for automation." message={projectsState.error} retry={projectsState.retry} />
-  if (!selectedPlatform || !selectedProject) return <EmptyState title="Create a project first" description="Automation sessions need a project and a supported platform." />
-
-  return (
-    <div className="space-y-6">
-      <section className={`${paperCard} p-6 sm:p-7`}>
-        <SectionHeader
-          eyebrow="Automation"
-          title="Guided setup, backed by the real API"
-          description="These requests create automation sessions on the backend. The browser automation layer can pick them up later."
-        />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-          <div className="grid gap-3">
-            {platforms.map((platform, index) => (
-              <button
-                key={platform.id}
-                type="button"
-                onClick={() => setSelectedPlatformId(platform.id)}
-                className={`rounded-[26px] border-[2px] border-[#2c211b] px-4 py-4 text-left shadow-[6px_6px_16px_rgba(45,33,26,0.05)] transition hover:-translate-y-0.5 ${
-                  selectedPlatform.id === platform.id ? NAV_ITEMS[index % NAV_ITEMS.length].color + ' text-[#1f1814]' : 'bg-white text-[#1f1814]'
-                }`}
-              >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="min-w-0 break-words font-black leading-tight">{platform.name}</span>
-                      <StatusBadge status={platform.status} />
-                    </div>
-                    <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
-                  </div>
-                  <ChevronRight className="h-4 w-4" />
-                </div>
-                <p className="mt-3 text-sm leading-6 text-current/70">{platform.notes || platform.automation}</p>
-              </button>
-            ))}
-          </div>
-
-          <div className={cardClass}>
-            <SectionHeader
-              eyebrow="Connection brief"
-              title={`Setup ${selectedPlatform.name}`}
-              description="Fill in the brand details, then either queue the session or request a connect run."
-            />
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <Field label="Project to connect" description="Choose the project this account setup belongs to." className="sm:col-span-2">
-                <select className={inputField} value={selectedProject.id} onChange={(event) => setSelectedProjectId(event.target.value)}>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Username">
-                <input className={inputField} value={username} onChange={(event) => setUsername(event.target.value)} />
-              </Field>
-
-              <Field label="Account URL">
-                <input className={inputField} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
-              </Field>
-
-              <Field label="Signup email">
-                <input className={inputField} value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} />
-              </Field>
-
-              <Field label="Signup password">
-                <input
-                  className={inputField}
-                  type="password"
-                  value={signupPassword}
-                  onChange={(event) => setSignupPassword(event.target.value)}
-                />
-              </Field>
-
-              <Field label="Bio" className="sm:col-span-2">
-                <textarea className={textareaField} value={bio} onChange={(event) => setBio(event.target.value)} />
-              </Field>
-
-              <Field label="Profile image URL" className="sm:col-span-2">
-                <input
-                  className={inputField}
-                  value={profileImageUrl}
-                  onChange={(event) => setProfileImageUrl(event.target.value)}
-                  placeholder="https://..."
-                />
-              </Field>
-
-              <Field label="Setup notes" className="sm:col-span-2">
-                <textarea className={textareaField} value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </Field>
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button className={primaryButton} onClick={() => void handleRequestConnection()} type="button">
-                <UserRoundPlus className="h-4 w-4" />
-                Request connect
-              </button>
-              <DashboardAction onClick={() => void handleQueueSession()} tone="coral">
-                <CircleDashed className="h-4 w-4" />
-                Queue session
-              </DashboardAction>
-              <DashboardAction onClick={() => void handleLaunchSignupPrefill()} tone="blue">
-                <ExternalLink className="h-4 w-4" />
-                {isLaunching ? 'Starting...' : 'Launch prefill'}
-              </DashboardAction>
-            </div>
-
-            {sessionError && <p className="mt-4 text-sm text-rose-300">{sessionError}</p>}
-            {launchStatus && <p className="mt-4 text-sm text-slate-200">{launchStatus}</p>}
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.03fr_0.97fr]">
-        <article className={`${paperCard} p-6 sm:p-7`}>
-          <SectionHeader eyebrow="Supported platforms" title="Supported platforms" />
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {platforms.map((platform) => (
-              <div key={platform.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <span className="min-w-0 break-words font-black leading-tight text-[#1f1814]">{platform.name}</span>
-                  <StatusBadge status={platform.status} />
-                </div>
-                <p className="mt-3 text-sm leading-6 text-[#5f554a]">{platform.notes || platform.automation}</p>
-                <p className="mt-3 text-xs font-black uppercase tracking-[0.26em] text-[#6b625a]">
-                  {platform.phoneRequired ? 'Phone may be required' : 'Email-friendly'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className={`${paperCard} p-6 sm:p-7`}>
-          <SectionHeader eyebrow="Session log" title="Recent requests" />
-          {sessions.length === 0 ? (
-            <EmptyState title="No sessions yet." description="Request or queue a setup to see the session response here." compact />
-          ) : (
-            <div className="mt-5 space-y-3">
-              {sessions.map((session) => (
-                <SessionCard key={session.id} session={session} />
-              ))}
-            </div>
-          )}
-        </article>
-      </section>
-    </div>
-  )
-}
-
-function AutomationView() {
   const projectsState = useAsync(getProjects)
   const campaignsState = useAsync(getCampaigns)
   const sessionsState = useAsync(getAutomationSessions)
@@ -2045,7 +1760,7 @@ function PhoneSimulator({
   onPrepareAccount: () => void
   onResumeSession: () => void
 }) {
-  const profileUrl = resolvePlatformUrl(platform.name, account, project, settings)
+  const profileUrl = resolvePlatformUrl(platform.name, account, project)
   const username = account?.username || normalizeAutomationUsername(project?.name ?? 'Virel', platform.name)
   const status = account?.status ?? (platform.phoneRequired ? 'Needs verification' : 'Pending')
 
@@ -2118,16 +1833,13 @@ function PhoneSimulator({
   )
 }
 
-function resolvePlatformUrl(platform: PlatformName, account: PlatformAccount | null, project: Project | null, settings: UserSettings | null) {
+function resolvePlatformUrl(platform: PlatformName, account: PlatformAccount | null, project: Project | null) {
   const accountUrl = account?.accountUrl
   if (accountUrl && isSocialAccountUrl(platform, accountUrl)) {
     return accountUrl
   }
 
-  const slug = normalizeAutomationUsername(
-    project?.name ?? 'Virel',
-    platform,
-  )
+  const slug = normalizeAutomationUsername(project?.name ?? 'Virel', platform)
     .toLowerCase()
     .replace(/^@/, '')
     .replace(/^u\//, '')
@@ -2802,21 +2514,6 @@ const dangerLink =
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value)
-}
-
-function normalizeHandle(value: string) {
-  const handle = value.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24)
-  return handle ? `@${handle}` : ''
-}
-
-function calculateLaunchProgress(project: Project, campaigns: Campaign[], automationSessions: AutomationSession[]) {
-  const hasCampaign = campaigns.some((campaign) => campaign.projectId === project.id)
-  const hasAutomation = automationSessions.some((session) => session.projectId === project.id)
-  const baseProgress = Number.isFinite(project.progress) ? project.progress : 0
-  const statusProgress = project.status === 'Launched' ? 100 : project.status === 'Active' ? 45 : project.status === 'Paused' ? 35 : 15
-  const milestoneProgress = (hasCampaign ? 25 : 0) + (hasAutomation ? 25 : 0)
-
-  return Math.min(100, Math.max(baseProgress, statusProgress + milestoneProgress))
 }
 
 function formatDate(value?: string) {

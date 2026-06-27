@@ -26,6 +26,28 @@ export interface AutomationSessionCreateInput {
   payload?: Record<string, unknown>
 }
 
+export interface AutomationLaunchInput {
+  projectId: string
+  platform: PlatformName
+  email?: string
+  password?: string
+  username: string
+  displayName: string
+  bio?: string
+  websiteUrl?: string
+  profileImagePath?: string
+  signupMethod?: 'email' | 'google'
+  holdMs?: number
+}
+
+export interface AutomationLaunchResult {
+  status: string
+  pid: number
+  platform: string
+  message: string
+  logPath?: string
+}
+
 export interface AutomationSmokeRunInput {
   platform: PlatformName
   signupMethod?: 'email' | 'google'
@@ -56,6 +78,16 @@ export interface AutomationResumeResult {
   platform: string
   logPath: string
   message: string
+}
+
+export interface PublishBatchInput {
+  projectId: string
+  displayName: string
+  username: string
+  bio?: string
+  websiteUrl?: string
+  profileImagePath?: string
+  posts: GeneratedPost[]
 }
 
 export async function getPlatforms(): Promise<Platform[]> {
