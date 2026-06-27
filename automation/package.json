@@ -2,9 +2,14 @@
   "name": "automation",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx src/index.ts",
+    "setup": "tsx src/index.ts setup",
+    "smoke": "tsx src/index.ts smoke",
+    "publish": "tsx src/index.ts publish",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck"
   },
   "keywords": [],
   "author": "",
@@ -17,5 +22,8 @@
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1"
   }
 }
