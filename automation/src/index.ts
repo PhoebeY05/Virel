@@ -11,7 +11,8 @@ const SmokeTestInputSchema = AccountSetupSchema.pick({
   username: true,
   password: true,
   displayName: true,
-  bio: true
+  bio: true,
+  signupMethod: true
 }).extend({
   holdMs: z.number().int().min(5_000).max(900_000).optional()
 });

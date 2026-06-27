@@ -14,6 +14,7 @@ const signupUrls: Record<PlatformName, string> = {
 
 export interface SmokeTestInput {
   platform: PlatformName;
+  signupMethod?: "email" | "google";
   email?: string;
   username: string;
   password?: string;
@@ -30,15 +31,21 @@ export class SmokeTestService {
 
     try {
       await managed.page.goto(signupUrls[input.platform], { waitUntil: "domcontentloaded" });
-      await this.fillFirstAvailable(managed.page, ["input[name='email']", "input[type='email']"], input.email ?? "");
-      await this.fillFirstAvailable(
-        managed.page,
-        ["input[name='username']", "input[autocomplete='username']", "input[type='text']"],
-        input.username
-      );
-      await this.fillFirstAvailable(managed.page, ["input[name='name']", "input[aria-label='Name']"], input.displayName);
-      await this.fillFirstAvailable(managed.page, ["input[name='password']", "input[type='password']"], input.password ?? "");
-      await this.fillFirstAvailable(managed.page, ["textarea[name='bio']", "textarea"], input.bio ?? "");
+      if (input.signupMethod === "google") {
+        await this.startGoogleSignup(managed.page, input.platform);
+      } else if (input.platform === "instagram") {
+        await this.fillInstagramSignup(managed.page, input);
+      } else {
+        await this.fillFirstAvailable(managed.page, ["input[name='email']", "input[type='email']"], input.email ?? "");
+        await this.fillFirstAvailable(
+          managed.page,
+          ["input[name='username']", "input[autocomplete='username']", "input[type='text']"],
+          input.username
+        );
+        await this.fillFirstAvailable(managed.page, ["input[name='name']", "input[aria-label='Name']"], input.displayName);
+        await this.fillFirstAvailable(managed.page, ["input[name='password']", "input[type='password']"], input.password ?? "");
+        await this.fillFirstAvailable(managed.page, ["textarea[name='bio']", "textarea"], input.bio ?? "");
+      }
 
       const holdMs = input.holdMs ?? 300_000;
       console.log(`[smoke] ${input.platform} browser is open for ${Math.round(holdMs / 1000)} seconds.`);
@@ -46,6 +53,57 @@ export class SmokeTestService {
     } finally {
       await this.browserManager.close();
     }
+  }
+
+  private async startGoogleSignup(page: import("playwright").Page, platform: PlatformName): Promise<void> {
+    const clicked = await this.clickFirstAvailable(page, [
+      "button:has-text('Continue with Google')",
+      "a:has-text('Continue with Google')",
+      "div[role='button']:has-text('Continue with Google')",
+      "button:has-text('Sign up with Google')",
+      "a:has-text('Sign up with Google')",
+      "div[role='button']:has-text('Sign up with Google')",
+      "button:has-text('Log in with Google')",
+      "a:has-text('Log in with Google')",
+      "div[role='button']:has-text('Log in with Google')",
+      "button:has-text('Google')",
+      "a:has-text('Google')",
+      "div[role='button']:has-text('Google')",
+      "[aria-label*='Google']",
+      "[data-testid*='google' i]"
+    ]);
+
+    if (clicked) {
+      console.log(`[smoke] ${platform} Google signup entry point clicked. Complete Google auth and platform verification manually.`);
+      return;
+    }
+
+    console.log(`[smoke] ${platform} did not expose a visible Google signup option. Continue manually in the opened browser.`);
+  }
+
+  private async fillInstagramSignup(page: import("playwright").Page, input: SmokeTestInput): Promise<void> {
+    await this.fillFirstAvailable(
+      page,
+      [
+        "input[name='emailOrPhone']",
+        "input[aria-label='Mobile Number or Email']",
+        "input[placeholder='Mobile Number or Email']",
+        "input[autocomplete='email']",
+        "input[type='email']"
+      ],
+      input.email ?? ""
+    );
+    await this.fillFirstAvailable(
+      page,
+      ["input[name='fullName']", "input[aria-label='Full Name']", "input[placeholder='Full Name']"],
+      input.displayName
+    );
+    await this.fillFirstAvailable(
+      page,
+      ["input[name='username']", "input[aria-label='Username']", "input[placeholder='Username']", "input[autocomplete='username']"],
+      input.username
+    );
+    await this.fillFirstAvailable(page, ["input[name='password']", "input[type='password']"], input.password ?? "");
   }
 
   private async fillFirstAvailable(page: import("playwright").Page, selectors: string[], value: string): Promise<void> {
@@ -63,5 +121,17 @@ export class SmokeTestService {
         return;
       }
     }
+  }
+
+  private async clickFirstAvailable(page: import("playwright").Page, selectors: string[]): Promise<boolean> {
+    for (const selector of selectors) {
+      const locator = page.locator(selector).first();
+      if (await locator.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        await locator.click();
+        return true;
+      }
+    }
+
+    return false;
   }
 }

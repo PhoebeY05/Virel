@@ -15,4 +15,28 @@ export class InstagramAdapter extends BasePlatformAdapter {
       supportsAutomatedPublishing: false
     });
   }
+
+  protected async fillSignupFields(): Promise<void> {
+    await this.fillFirstAvailable(
+      [
+        "input[name='emailOrPhone']",
+        "input[aria-label='Mobile Number or Email']",
+        "input[placeholder='Mobile Number or Email']",
+        "input[autocomplete='email']",
+        "input[type='email']"
+      ],
+      this.setup.email ?? ""
+    );
+    await this.fillFirstAvailable(
+      ["input[name='fullName']", "input[aria-label='Full Name']", "input[placeholder='Full Name']"],
+      this.setup.displayName
+    );
+    await this.fillFirstAvailable(
+      ["input[name='username']", "input[aria-label='Username']", "input[placeholder='Username']", "input[autocomplete='username']"],
+      this.setup.username
+    );
+    if (this.setup.password) {
+      await this.fillFirstAvailable(["input[name='password']", "input[type='password']"], this.setup.password);
+    }
+  }
 }
