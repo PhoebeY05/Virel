@@ -29,6 +29,7 @@ from app.schemas import (
     AnalyticsDetail,
     AnalyticsPoint,
     AnalyticsSummary,
+    AutomationConnectRequest,
     AutomationSessionCreate,
     AutomationSessionUpdate,
     CampaignDetail,
@@ -354,6 +355,25 @@ def create_automation_session(
 ) -> AutomationSession:
     ensure_owned_project(session, payload.project_id, user_id)
     automation = AutomationSession(**payload.model_dump())
+    session.add(automation)
+    session.flush()
+    return automation
+
+
+def connect_automation(
+    session: Session,
+    user_id: str,
+    payload: AutomationConnectRequest,
+) -> AutomationSession:
+    ensure_owned_project(session, payload.project_id, user_id)
+    automation = AutomationSession(
+        project_id=payload.project_id,
+        platform=payload.platform,
+        status=payload.status,
+        step=payload.step,
+        progress=payload.progress,
+        payload=payload.payload,
+    )
     session.add(automation)
     session.flush()
     return automation

@@ -12,6 +12,8 @@ FastAPI backend for the Virel launch infrastructure MVP.
 - Mock analytics endpoints
 - Comment reply suggestion endpoints
 - Optional Clerk JWT authentication
+- Router modules under `app/api/routes/`
+- API examples and a tutorial-driven demo dataset walkthrough
 
 ## Environment
 
@@ -42,4 +44,9 @@ The repository includes an Alembic scaffold under `backend/alembic/`.
 cd backend
 pytest
 ```
+
+## Docs
+
+- Tutorial: [backend/docs/tutorial.md](./docs/tutorial.md)
+- API examples: [backend/docs/api-examples.md](./docs/api-examples.md)
 

@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.platforms import platform_names
+
 
 class APIModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -197,6 +199,22 @@ class AutomationSessionCreate(AutomationSessionBase):
     pass
 
 
+class AutomationConnectRequest(BaseModel):
+    project_id: str
+    platform: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: str = "queued"
+    step: str = "connect_requested"
+    progress: int = 0
+
+    @field_validator("platform")
+    @classmethod
+    def validate_platform(cls, value: str) -> str:
+        if value not in platform_names():
+            raise ValueError(f"Unsupported platform: {value}")
+        return value
+
+
 class AutomationSessionUpdate(BaseModel):
     status: str | None = None
     step: str | None = None
@@ -282,4 +300,3 @@ class HealthRead(APIModel):
     service: str
     auth_enabled: bool
     database_url: str
-

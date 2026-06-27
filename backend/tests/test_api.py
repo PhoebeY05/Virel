@@ -124,6 +124,10 @@ def test_analytics_endpoints(client: TestClient) -> None:
     project = create_project(client)
     campaign = create_campaign(client, project["id"])
 
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    assert "likes" in response.json()
+
     response = client.get("/analytics/summary")
     assert response.status_code == 200
     summary = response.json()
@@ -137,6 +141,28 @@ def test_analytics_endpoints(client: TestClient) -> None:
     response = client.get(f"/analytics/campaigns/{campaign['id']}")
     assert response.status_code == 200
     assert response.json()["campaign_id"] == campaign["id"]
+
+
+def test_automation_connect_endpoint(client: TestClient) -> None:
+    project = create_project(client)
+
+    response = client.post(
+        "/automation/connect",
+        json={
+            "project_id": project["id"],
+            "platform": "instagram",
+            "payload": {
+                "username": "studysnapai",
+                "bio": "Launching soon",
+            },
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["project_id"] == project["id"]
+    assert body["platform"] == "instagram"
+    assert body["step"] == "connect_requested"
+    assert body["payload"]["username"] == "studysnapai"
 
 
 def test_prompt_validation() -> None:
@@ -165,4 +191,3 @@ def test_auth_middleware_blocks_when_enabled(tmp_path: Path) -> None:
         response = client.get("/projects")
         assert response.status_code == 401
         assert response.json()["code"] == "AUTH_REQUIRED"
-
