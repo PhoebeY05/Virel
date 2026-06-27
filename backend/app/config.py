@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     frontend_url: AnyHttpUrl = "http://localhost:3000"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
+    ayrshare_api_key: str | None = None
+    ayrshare_profile_key: str | None = None
+    scrapecreators_api_key: str | None = None
+    analytics_timeout_seconds: float = 8.0
+    analytics_cache_ttl_seconds: int = 900
     auth_enabled: bool = False
     clerk_jwks_url: str | None = None
     local_user_id: str = "local-user"

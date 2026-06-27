@@ -940,7 +940,7 @@ function AnalyticsView() {
           <MetricTile label="Projects" value={analytics.summary.totalProjects.toString()} icon={FolderKanban} tone="blue" />
           <MetricTile label="Campaigns" value={analytics.summary.activeCampaigns.toString()} icon={Sparkles} tone="yellow" />
           <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={ChartColumn} tone="green" />
-          <MetricTile label="CTR" value={`${analytics.summary.ctr}%`} icon={LineChart} tone="purple" />
+          <MetricTile label="Views" value={formatNumber(analytics.summary.views)} icon={LineChart} tone="purple" />
         </div>
       </section>
 
@@ -978,7 +978,8 @@ function AnalyticsView() {
                   <p>{formatNumber(platform.likes)} likes</p>
                   <p>{formatNumber(platform.comments)} comments</p>
                   <p>{formatNumber(platform.shares)} shares</p>
-                  <p>{formatNumber(platform.clicks)} clicks</p>
+                  <p>{formatNumber(platform.views)} views</p>
+                  <p>{formatNumber(platform.followers)} followers</p>
                 </div>
               </div>
             ))}

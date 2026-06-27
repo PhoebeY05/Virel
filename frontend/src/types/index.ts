@@ -86,6 +86,8 @@ export interface AnalyticsPoint {
   likes: number
   comments: number
   shares: number
+  views: number
+  followers: number
   ctr: number
 }
 
@@ -94,6 +96,8 @@ export interface PlatformAnalytics {
   likes: number
   comments: number
   shares: number
+  views: number
+  followers: number
   clicks: number
   ctr: number
   engagement: number
@@ -118,6 +122,8 @@ export interface Analytics {
     activeCampaigns: number
     totalProjects: number
     engagement: number
+    views: number
+    followers: number
     ctr: number
   }
   timeline: AnalyticsPoint[]

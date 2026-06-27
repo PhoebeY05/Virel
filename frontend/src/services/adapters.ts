@@ -73,6 +73,8 @@ export interface ApiAnalytics {
   likes: number
   comments: number
   shares: number
+  views: number
+  followers: number
   clicks: number
   ctr: number
   engagement: number
@@ -84,6 +86,8 @@ export interface ApiAnalytics {
     likes: number
     comments: number
     shares: number
+    views: number
+    followers: number
     clicks: number
     ctr: number
   }[]
@@ -92,6 +96,8 @@ export interface ApiAnalytics {
     likes: number
     comments: number
     shares: number
+    views: number
+    followers: number
     clicks: number
     ctr: number
     engagement: number
@@ -270,6 +276,8 @@ export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
     likes: point.likes,
     comments: point.comments,
     shares: point.shares,
+    views: point.views ?? 0,
+    followers: point.followers ?? 0,
     ctr: toPercent(point.ctr),
   }))
   const platforms = analytics.platforms.map((platform) => ({
@@ -277,6 +285,8 @@ export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
     likes: platform.likes,
     comments: platform.comments,
     shares: platform.shares,
+    views: platform.views ?? 0,
+    followers: platform.followers ?? 0,
     clicks: platform.clicks,
     ctr: toPercent(platform.ctr),
     engagement: platform.engagement,
@@ -300,6 +310,8 @@ export function fromApiAnalytics(analytics: ApiAnalytics): Analytics {
       activeCampaigns: analytics.active_campaigns,
       totalProjects: analytics.total_projects,
       engagement: analytics.engagement,
+      views: analytics.views ?? 0,
+      followers: analytics.followers ?? 0,
       ctr: toPercent(analytics.ctr),
     },
     timeline,

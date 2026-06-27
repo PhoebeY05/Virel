@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timezone
-from statistics import mean
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.generator import generate_campaign_plan, generate_reply, validate_plan
+from app.analytics.providers import AccountMetrics, AnalyticsAccount, collect_account_metrics
 from app.auth import CurrentUser
 from app.config import Settings
 from app.errors import AppError
@@ -27,7 +26,6 @@ from app.platforms import SUPPORTED_PLATFORM_MAP, SUPPORTED_PLATFORMS, platform_
 from app.schemas import (
     AnalyticsDetail,
     AnalyticsPoint,
-    AnalyticsSummary,
     AutomationConnectRequest,
     AutomationSessionCreate,
     AutomationSessionUpdate,
@@ -46,7 +44,6 @@ from app.schemas import (
     ProjectRead,
     ProjectUpdate,
     ReplySuggestionRead,
-    TopPostStatsRead,
 )
 
 
@@ -466,160 +463,255 @@ def send_reply(
     return suggestion
 
 
-def _empty_analytics(project_id: str | None = None, campaign_id: str | None = None) -> AnalyticsDetail:
+def _snapshot_metadata(snapshot: AnalyticsSnapshot) -> dict[str, object]:
+    if snapshot.timeline and isinstance(snapshot.timeline[-1], dict):
+        return snapshot.timeline[-1]
+    return {}
+
+
+def _metadata_int(snapshot: AnalyticsSnapshot, key: str) -> int:
+    value = _snapshot_metadata(snapshot).get(key, 0)
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _latest_snapshots(
+    session: Session,
+    user_id: str,
+    project_id: str | None = None,
+) -> list[AnalyticsSnapshot]:
+    query = (
+        select(AnalyticsSnapshot)
+        .join(AnalyticsSnapshot.project)
+        .where(Project.user_id == user_id, AnalyticsSnapshot.campaign_id.is_(None))
+        .order_by(AnalyticsSnapshot.snapshot_date.desc())
+    )
+    if project_id:
+        query = query.where(AnalyticsSnapshot.project_id == project_id)
+
+    latest: dict[tuple[str | None, str], AnalyticsSnapshot] = {}
+    for snapshot in session.scalars(query):
+        latest.setdefault((snapshot.project_id, snapshot.platform), snapshot)
+    return list(latest.values())
+
+
+def _snapshots_are_fresh(snapshots: list[AnalyticsSnapshot], ttl_seconds: int) -> bool:
+    if not snapshots or ttl_seconds <= 0:
+        return False
+    now = datetime.now(timezone.utc)
+    for snapshot in snapshots:
+        captured_at = snapshot.snapshot_date
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        if (now - captured_at).total_seconds() > ttl_seconds:
+            return False
+    return True
+
+
+def _store_account_metrics(session: Session, metrics: AccountMetrics) -> None:
+    snapshot = session.scalar(
+        select(AnalyticsSnapshot)
+        .where(
+            AnalyticsSnapshot.project_id == metrics.project_id,
+            AnalyticsSnapshot.campaign_id.is_(None),
+            AnalyticsSnapshot.platform == metrics.platform,
+        )
+        .order_by(AnalyticsSnapshot.snapshot_date.desc())
+    )
+    captured_at = datetime.now(timezone.utc)
+    if snapshot is None:
+        snapshot = AnalyticsSnapshot(
+            project_id=metrics.project_id,
+            campaign_id=None,
+            platform=metrics.platform,
+        )
+        session.add(snapshot)
+    snapshot.likes = metrics.likes
+    snapshot.comments = metrics.comments
+    snapshot.shares = metrics.shares
+    snapshot.clicks = 0
+    snapshot.ctr = 0.0
+    snapshot.snapshot_date = captured_at
+    snapshot.timeline = [
+        {
+            "date": captured_at.isoformat(),
+            "likes": metrics.likes,
+            "comments": metrics.comments,
+            "shares": metrics.shares,
+            "views": metrics.views,
+            "followers": metrics.followers,
+            "posts": metrics.posts,
+            "source": metrics.source,
+        }
+    ]
+
+
+def refresh_account_analytics(
+    session: Session,
+    settings: Settings,
+    user_id: str,
+    project_id: str | None = None,
+) -> None:
+    query = select(PlatformAccount).join(PlatformAccount.project).where(Project.user_id == user_id)
+    if project_id:
+        query = query.where(PlatformAccount.project_id == project_id)
+    accounts = list(session.scalars(query))
+    existing = _latest_snapshots(session, user_id, project_id)
+    if not accounts or _snapshots_are_fresh(existing, settings.analytics_cache_ttl_seconds):
+        return
+
+    provider_accounts = [
+        AnalyticsAccount(
+            project_id=account.project_id,
+            platform=account.platform,
+            username=account.username,
+            account_url=account.account_url,
+        )
+        for account in accounts
+    ]
+    for metrics in collect_account_metrics(settings, provider_accounts):
+        _store_account_metrics(session, metrics)
+    session.flush()
+
+
+def _analytics_from_snapshots(
+    snapshots: list[AnalyticsSnapshot],
+    *,
+    project_id: str | None = None,
+    campaign_id: str | None = None,
+    active_campaigns: int = 0,
+    total_projects: int = 0,
+) -> AnalyticsDetail:
+    grouped: dict[str, dict[str, int]] = {}
+    for snapshot in snapshots:
+        current = grouped.setdefault(
+            snapshot.platform,
+            {"likes": 0, "comments": 0, "shares": 0, "views": 0, "followers": 0, "posts": 0},
+        )
+        current["likes"] += snapshot.likes
+        current["comments"] += snapshot.comments
+        current["shares"] += snapshot.shares
+        current["views"] += _metadata_int(snapshot, "views")
+        current["followers"] += _metadata_int(snapshot, "followers")
+        current["posts"] += _metadata_int(snapshot, "posts")
+
+    platforms = [
+        PlatformStatsRead(
+            platform=platform,
+            likes=metrics["likes"],
+            comments=metrics["comments"],
+            shares=metrics["shares"],
+            views=metrics["views"],
+            followers=metrics["followers"],
+            engagement=metrics["likes"] + metrics["comments"] + metrics["shares"],
+            posts=metrics["posts"],
+        )
+        for platform, metrics in grouped.items()
+    ]
+    platforms.sort(key=lambda item: (item.engagement, item.views, item.followers), reverse=True)
+    likes = sum(item.likes for item in platforms)
+    comments = sum(item.comments for item in platforms)
+    shares = sum(item.shares for item in platforms)
+    views = sum(item.views for item in platforms)
+    followers = sum(item.followers for item in platforms)
+    engagement = likes + comments + shares
+    timeline = []
+    if snapshots:
+        latest_date = max(snapshot.snapshot_date for snapshot in snapshots)
+        timeline = [
+            AnalyticsPoint(
+                date=latest_date,
+                likes=likes,
+                comments=comments,
+                shares=shares,
+                views=views,
+                followers=followers,
+            )
+        ]
     return AnalyticsDetail(
         project_id=project_id,
         campaign_id=campaign_id,
-        likes=0,
-        comments=0,
-        shares=0,
-        ctr=0.0,
-        clicks=0,
-        best_platform="n/a",
-        engagement_timeline=[],
-    )
-
-
-def _mock_platform_metrics(seed: int, scale: int = 1) -> dict[str, int | float]:
-    likes = 30 + seed % 170 + scale * 3
-    comments = 4 + (seed // 7) % 35
-    shares = 2 + (seed // 11) % 20
-    clicks = 12 + (seed // 13) % 120
-    ctr = round(min(0.2, 0.015 + (seed % 25) / 2000), 4)
-    return {"likes": likes, "comments": comments, "shares": shares, "clicks": clicks, "ctr": ctr}
-
-
-def _timeline_for_seed(seed: int) -> list[AnalyticsPoint]:
-    points: list[AnalyticsPoint] = []
-    base = datetime.now(timezone.utc)
-    for offset in range(7):
-        daily_seed = seed + offset * 31
-        metrics = _mock_platform_metrics(daily_seed)
-        points.append(
-            AnalyticsPoint(
-                date=base.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=offset),
-                likes=int(metrics["likes"]),
-                comments=int(metrics["comments"]),
-                shares=int(metrics["shares"]),
-                ctr=float(metrics["ctr"]),
-                clicks=int(metrics["clicks"]),
-            )
-        )
-    return points
-
-
-def _aggregate_platform_summary(items: list[tuple[str, int]]) -> tuple[str, list[AnalyticsPoint], dict[str, dict[str, int | float]]]:
-    if not items:
-        return "n/a", [], {}
-    platform_metrics: dict[str, dict[str, int | float]] = {}
-    for platform, seed in items:
-        platform_metrics[platform] = _mock_platform_metrics(seed)
-    best_platform = max(platform_metrics.items(), key=lambda pair: pair[1]["likes"] + pair[1]["clicks"])[0]
-    timeline_seed = sum(seed for _, seed in items) or 1
-    return best_platform, _timeline_for_seed(timeline_seed), platform_metrics
-
-
-def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
-    campaign = ensure_campaign(session, campaign_id, user_id)
-    platform_items = [
-        (post.platform, _score_seed(campaign.id, post.id, post.platform))
-        for day in campaign.days
-        for post in day.posts
-    ]
-    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
-    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
-    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
-    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
-    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
-    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
-    return AnalyticsDetail(
-        project_id=campaign.project_id,
-        campaign_id=campaign.id,
         likes=likes,
         comments=comments,
         shares=shares,
-        ctr=ctr,
-        clicks=clicks,
-        best_platform=best_platform,
+        views=views,
+        followers=followers,
+        engagement=engagement,
+        best_platform=platforms[0].platform if platforms else "n/a",
         engagement_timeline=timeline,
+        active_campaigns=active_campaigns,
+        total_projects=total_projects,
+        platforms=platforms,
+        top_posts=[],
     )
 
 
-def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
-    campaign = ensure_campaign(session, campaign_id, user_id)
-    snapshots = list(
+def _load_campaigns_for_user(session: Session, user_id: str) -> list[Campaign]:
+    return list(
         session.scalars(
-            select(AnalyticsSnapshot)
-            .where(AnalyticsSnapshot.campaign_id == campaign.id)
-            .order_by(AnalyticsSnapshot.snapshot_date.asc())
+            select(Campaign)
+            .join(Campaign.project)
+            .options(selectinload(Campaign.days).selectinload(CampaignDay.posts))
+            .where(Project.user_id == user_id)
+            .order_by(Campaign.created_at.desc())
         )
     )
-    return _aggregate_snapshots(snapshots, project_id=campaign.project_id, campaign_id=campaign.id)
 
 
-def summarize_project(session: Session, project_id: str, user_id: str) -> AnalyticsDetail:
+def summarize_campaign(
+    session: Session,
+    settings: Settings,
+    campaign_id: str,
+    user_id: str,
+) -> AnalyticsDetail:
+    campaign = ensure_campaign(session, campaign_id, user_id)
+    refresh_account_analytics(session, settings, user_id, campaign.project_id)
+    total_projects = session.scalar(select(func.count()).select_from(Project).where(Project.user_id == user_id)) or 0
+    return _analytics_from_snapshots(
+        _latest_snapshots(session, user_id, campaign.project_id),
+        project_id=campaign.project_id,
+        campaign_id=campaign.id,
+        active_campaigns=1 if campaign.status.lower() in {"draft", "scheduled", "live"} else 0,
+        total_projects=total_projects,
+    )
+
+
+def summarize_project(
+    session: Session,
+    settings: Settings,
+    project_id: str,
+    user_id: str,
+) -> AnalyticsDetail:
     project = ensure_owned_project(session, project_id, user_id)
-    snapshots = list(
+    campaigns = list(
         session.scalars(
             select(Campaign)
             .where(Campaign.project_id == project.id)
             .options(selectinload(Campaign.days).selectinload(CampaignDay.posts))
+            .order_by(Campaign.created_at.desc())
         )
     )
-    platform_items = []
-    for campaign in campaigns:
-        for day in campaign.days:
-            for post in day.posts:
-                platform_items.append((post.platform, _score_seed(project.id, campaign.id, post.id, post.platform)))
-    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
-    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
-    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
-    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
-    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
-    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
-    return AnalyticsDetail(
+    refresh_account_analytics(session, settings, user_id, project.id)
+    return _analytics_from_snapshots(
+        _latest_snapshots(session, user_id, project.id),
         project_id=project.id,
-        campaign_id=None,
-        likes=likes,
-        comments=comments,
-        shares=shares,
-        ctr=ctr,
-        clicks=clicks,
-        best_platform=best_platform,
-        engagement_timeline=timeline,
+        active_campaigns=sum(1 for campaign in campaigns if campaign.status.lower() in {"draft", "scheduled", "live"}),
+        total_projects=1,
     )
 
 
-def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
-    campaigns = list(
-        session.scalars(
-            select(AnalyticsSnapshot)
-            .join(AnalyticsSnapshot.project)
-            .where(Project.user_id == user_id)
-        )
+def summarize_all(session: Session, settings: Settings, user_id: str) -> AnalyticsDetail:
+    campaigns = _load_campaigns_for_user(session, user_id)
+    total_projects = len(list_projects(session, user_id))
+    refresh_account_analytics(session, settings, user_id)
+    return _analytics_from_snapshots(
+        _latest_snapshots(session, user_id),
+        active_campaigns=sum(1 for campaign in campaigns if campaign.status.lower() in {"draft", "scheduled", "live"}),
+        total_projects=total_projects,
     )
-    platform_items = []
-    for campaign in campaigns:
-        for day in campaign.days:
-            for post in day.posts:
-                platform_items.append((post.platform, _score_seed(campaign.id, post.id, post.platform)))
-    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
-    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
-    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
-    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
-    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
-    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
-    return AnalyticsDetail(
-        project_id=None,
-        campaign_id=None,
-        likes=likes,
-        comments=comments,
-        shares=shares,
-        ctr=ctr,
-        clicks=clicks,
-        best_platform=best_platform,
-        engagement_timeline=timeline,
-    )
+
+
+def list_platform_stats(session: Session, settings: Settings, user_id: str) -> list[PlatformStatsRead]:
+    return summarize_all(session, settings, user_id).platforms
 
 
 def list_supported_platforms() -> list[dict[str, object]]:
