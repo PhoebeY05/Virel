@@ -59,7 +59,7 @@ def verify_clerk_jwt(token: str, settings: Settings) -> CurrentUser:
 
 
 def auth_middleware(settings: Settings):
-    public_paths = {"/health", "/platforms", "/openapi.json", "/docs", "/redoc"}
+    public_paths = {"/health", "/platforms", "/openapi.json", "/docs", "/redoc", "/media"}
 
     async def middleware(request: Request, call_next):
         if not settings.auth_enabled:

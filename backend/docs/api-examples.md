@@ -9,14 +9,14 @@ These examples match the backend contract the frontend team will consume.
   {
     "id": "proj_123",
     "user_id": "user_123",
-    "name": "StudySnapAI",
-    "description": "An AI study companion...",
-    "target_audience": "university students",
-    "goal": "drive signups",
+    "name": "Virel",
+    "description": "A launch operations workspace for student projects.",
+    "target_audience": "student founders",
+    "goal": "drive project launches",
     "status": "draft",
-    "repo_url": "https://github.com/example/studysnapai",
-    "demo_url": "https://studysnap.example.com",
-    "logo_url": "https://cdn.example.com/studysnap-logo.png",
+    "repo_url": "https://github.com/example/virel",
+    "demo_url": "https://virel.example.com",
+    "logo_url": "https://cdn.example.com/virel-logo.png",
     "created_at": "2026-06-27T00:00:00Z",
     "updated_at": "2026-06-27T00:00:00Z"
   }
@@ -29,14 +29,14 @@ Request:
 
 ```json
 {
-  "name": "StudySnapAI",
-  "description": "An AI study companion...",
-  "target_audience": "university students",
-  "goal": "drive signups",
+  "name": "Virel",
+  "description": "A launch operations workspace for student projects.",
+  "target_audience": "student founders",
+  "goal": "drive project launches",
   "status": "draft",
-  "repo_url": "https://github.com/example/studysnapai",
-  "demo_url": "https://studysnap.example.com",
-  "logo_url": "https://cdn.example.com/studysnap-logo.png"
+  "repo_url": "https://github.com/example/virel",
+  "demo_url": "https://virel.example.com",
+  "logo_url": "https://cdn.example.com/virel-logo.png"
 }
 ```
 
@@ -86,11 +86,10 @@ Request:
   "project_id": "proj_123",
   "platform": "instagram",
   "payload": {
-    "username": "studysnapai",
-    "bio": "Study smarter, not harder."
+    "username": "virelai",
+    "bio": "Build and launch student projects faster."
   }
 }
 ```
 
 This creates an automation session the Playwright service can pick up later.
-

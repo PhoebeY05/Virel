@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_request_db
 from app.auth import CurrentUser, get_current_user
 from app.schemas import AutomationConnectRequest, AutomationSessionCreate, AutomationSessionRead, AutomationSessionUpdate
-from app.services import connect_automation, create_automation_session, ensure_user, get_automation_session, update_automation_session
+from app.services import (
+    connect_automation,
+    create_automation_session,
+    ensure_user,
+    get_automation_session,
+    list_automation_sessions,
+    update_automation_session,
+)
 
 router = APIRouter(tags=["automation"])
 
@@ -31,6 +38,15 @@ def connect_automation_session(
     return connect_automation(db, user.id, payload)
 
 
+@router.get("/automation/sessions", response_model=list[AutomationSessionRead])
+def get_automation_sessions(
+    db: Session = Depends(get_request_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[AutomationSessionRead]:
+    user = ensure_user(db, current_user)
+    return list_automation_sessions(db, user.id)
+
+
 @router.get("/automation/sessions/{session_id}", response_model=AutomationSessionRead)
 def get_automation(
     session_id: str,
@@ -50,4 +66,3 @@ def patch_automation(
 ) -> AutomationSessionRead:
     user = ensure_user(db, current_user)
     return update_automation_session(db, session_id, user.id, payload)
-

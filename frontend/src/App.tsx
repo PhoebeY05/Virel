@@ -1,88 +1,126 @@
-import { useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import {
   ArrowRight,
   BadgeCheck,
-  BriefcaseBusiness,
-  ChartColumn,
+  BarChart3,
   ChevronRight,
   CircleDashed,
-  Clock3,
   ExternalLink,
   FolderKanban,
-  Ghost,
-  Globe,
+  Globe2,
   LayoutDashboard,
   LineChart,
   Network,
   PencilLine,
   Plus,
-  Rocket,
+  Search,
+  Settings2,
   ShieldCheck,
   Sparkles,
-  Settings2,
   Trash2,
   UserRoundPlus,
+  Upload,
   WandSparkles,
 } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { platformNames } from './mocks/data'
+import type { ReactNode } from 'react'
+import { useMemo, useState } from 'react'
+import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
-import { connectAutomation, createAutomationSession, getPlatforms } from './services/automation'
+import { connectAutomation, createAutomationSession, getAutomationSessions, getPlatforms } from './services/automation'
 import { generateCampaign, getCampaigns, type GenerateCampaignInput } from './services/campaigns'
+import { uploadImage } from './services/media'
 import { createProject, deleteProject, getProjects, updateProject, type ProjectInput } from './services/projects'
 import type {
-  Analytics,
+  AutomationSession,
   Campaign,
-  Platform,
   PlatformName,
   Project,
   ProjectStatus,
-  AutomationSession,
 } from './types'
 
 type View = 'Dashboard' | 'Projects' | 'Campaigns' | 'Analytics' | 'Automation' | 'Settings'
 
-const NAV_ITEMS: Array<{
+type NavItem = {
   view: View
-  label: string
-  icon: LucideIcon
+  number: string
+  title: string
   description: string
-}> = [
-  { view: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard, description: 'Performance snapshot' },
-  { view: 'Projects', label: 'Projects', icon: BriefcaseBusiness, description: 'Project workspace' },
-  { view: 'Campaigns', label: 'Campaigns', icon: WandSparkles, description: 'Generate launch plans' },
-  { view: 'Analytics', label: 'Analytics', icon: LineChart, description: 'Campaign performance' },
-  { view: 'Automation', label: 'Automation', icon: Network, description: 'Guided setup assistant' },
-  { view: 'Settings', label: 'Settings', icon: Settings2, description: 'Workspace preferences' },
+  color: string
+  icon: LucideIcon
+}
+
+const NAV_ITEMS: NavItem[] = [
+  {
+    view: 'Dashboard',
+    number: '01',
+    title: 'Reef Overview',
+    description: 'Current',
+    color: 'bg-[#d2e5ff]',
+    icon: LayoutDashboard,
+  },
+  {
+    view: 'Projects',
+    number: '02',
+    title: 'Project Reef',
+    description: 'Nest',
+    color: 'bg-[#fde2cf]',
+    icon: FolderKanban,
+  },
+  {
+    view: 'Campaigns',
+    number: '03',
+    title: 'Campaign Tide',
+    description: 'Flow',
+    color: 'bg-[#f7d9ea]',
+    icon: WandSparkles,
+  },
+  {
+    view: 'Analytics',
+    number: '04',
+    title: 'Analytics Current',
+    description: 'Signals',
+    color: 'bg-[#d9f1e5]',
+    icon: LineChart,
+  },
+  {
+    view: 'Automation',
+    number: '05',
+    title: 'Automation Dock',
+    description: 'Links',
+    color: 'bg-[#e4dbff]',
+    icon: Network,
+  },
+  {
+    view: 'Settings',
+    number: '06',
+    title: 'Harbor Settings',
+    description: 'Identity',
+    color: 'bg-[#efe5d7]',
+    icon: Settings2,
+  },
 ]
 
 const PROJECT_STATUS_OPTIONS: ProjectStatus[] = ['Planning', 'Active', 'Paused', 'Launched']
 const TONE_OPTIONS = ['Confident', 'Warm', 'Strategic', 'Bold']
-const inputClass =
-  'mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20'
-const selectClass = `${inputClass} pr-10`
-const textareaClass = `${inputClass} min-h-[120px] resize-y`
+
+const paperCard =
+  'rounded-[32px] border-[2px] border-[#2c211b] bg-[var(--paper-2)] shadow-[10px_10px_24px_rgba(45,33,26,0.08)]'
+const insetCard =
+  'rounded-[26px] border-[2px] border-[#2c211b] bg-[rgba(255,252,248,0.9)] shadow-[8px_8px_18px_rgba(45,33,26,0.06)]'
 const buttonBase =
-  'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/40'
-const primaryButton = `${buttonBase} bg-emerald-400 text-slate-950 hover:bg-emerald-300`
-const secondaryButton = `${buttonBase} border border-white/10 bg-white/5 text-slate-100 hover:border-white/20 hover:bg-white/10`
-const ghostButton = `${buttonBase} border border-transparent bg-transparent text-slate-300 hover:bg-white/5 hover:text-white`
-const cardClass = 'rounded-[28px] border border-white/10 bg-slate-950/75 p-6 shadow-[0_18px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl'
-const softCardClass = 'rounded-[24px] border border-white/10 bg-white/5 p-5'
-const panelClass = 'rounded-[32px] border border-white/10 bg-white/[0.03] p-6 shadow-[0_20px_90px_rgba(2,6,23,0.45)] backdrop-blur-xl'
+  'inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition active:translate-y-[1px]'
 
 function App() {
   const [view, setView] = useState<View>('Dashboard')
 
   return (
-    <div className="min-h-screen text-slate-100">
-      <div className="mx-auto grid min-h-screen max-w-[1800px] lg:grid-cols-[300px_minmax(0,1fr)]">
+    <div className="min-h-screen overflow-x-hidden bg-[var(--paper)] text-[var(--ink)]">
+      <div className="mx-auto grid min-h-screen max-w-[1680px] lg:grid-cols-[270px_minmax(0,1fr)]">
         <Sidebar view={view} onChange={setView} />
-        <main className="relative overflow-hidden">
-          <TopBar view={view} onChange={setView} />
-          <div className="relative z-10 px-5 pb-10 pt-2 lg:px-8">
+        <main className="relative isolate overflow-hidden">
+          <BackgroundBlobs />
+          <div className="relative z-10 px-4 pb-12 pt-5 sm:px-6 lg:px-10">
             {view === 'Dashboard' && <DashboardView onNavigate={setView} />}
             {view === 'Projects' && <ProjectsView />}
             {view === 'Campaigns' && <CampaignsView />}
@@ -98,104 +136,62 @@ function App() {
 
 function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => void }) {
   return (
-    <aside className="border-b border-white/10 bg-slate-950/90 px-4 py-4 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-5 lg:py-6">
-      <div className="flex items-center justify-between gap-3">
-        <button
-          className="flex items-center gap-3 rounded-2xl px-2 py-1 text-left transition hover:bg-white/5"
-          onClick={() => onChange('Dashboard')}
-          type="button"
-        >
-          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-400 text-lg font-black text-slate-950 shadow-lg shadow-emerald-500/20">
+    <aside className="sticky top-0 flex h-screen flex-col gap-5 border-b-[2px] border-[#2c211b] bg-[#f6efe6] px-4 py-4 lg:border-b-0 lg:border-r-[2px] lg:px-4 lg:py-5">
+      <div className="rounded-[28px] border-[2px] border-[#2c211b] bg-[rgba(255,252,248,0.96)] px-4 py-4 shadow-[8px_8px_18px_rgba(45,33,26,0.06)]">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.35em] text-[#b97fd6]">virel</p>
+            <h1 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">Studio</h1>
+            <p className="mt-1 text-xs uppercase tracking-[0.28em] text-[#6b625a]">creative workspace</p>
+          </div>
+          <div className="grid h-14 w-14 place-items-center rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff] text-xl font-black text-[#1f1814] shadow-[4px_4px_0_rgba(45,33,26,0.06)]">
             V
-          </span>
-          <span className="leading-tight">
-            <strong className="block font-display text-lg tracking-tight">Virel</strong>
-            <span className="block text-xs uppercase tracking-[0.28em] text-slate-400">Launch studio</span>
-          </span>
-        </button>
-        <span className="hidden rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-300 lg:inline-flex">
-          Live backend
-        </span>
+          </div>
+        </div>
       </div>
 
-      <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
-        <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Workspace note</p>
-        <h2 className="mt-2 font-display text-xl tracking-tight text-white">Human-in-the-loop by design</h2>
-        <p className="mt-3 text-sm leading-6 text-slate-300">
-          Virel keeps signup approval, CAPTCHA, and verification with the user while the backend
-          handles setup coordination and campaign generation.
-        </p>
-      </div>
-
-      <nav className="mt-6 grid gap-2" aria-label="Primary">
+      <nav className="grid gap-2">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon
           const active = item.view === view
           return (
             <button
-              className={`group flex items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${
-                active
-                  ? 'border-emerald-400/30 bg-emerald-400/10 text-white shadow-lg shadow-emerald-500/10'
-                  : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06] hover:text-white'
-              }`}
               key={item.view}
-              onClick={() => onChange(item.view)}
               type="button"
+              onClick={() => onChange(item.view)}
+              className={`group relative overflow-hidden rounded-[24px] border-[2px] border-[#2c211b] px-4 py-4 text-left transition hover:-translate-y-0.5 ${
+                active ? 'shadow-[8px_8px_18px_rgba(45,33,26,0.08)]' : 'shadow-[4px_4px_12px_rgba(45,33,26,0.04)]'
+              } ${item.color} text-[#1f1814]`}
             >
+              <div className="flex items-start gap-3">
+                <span className="text-xs font-black uppercase tracking-[0.28em] opacity-90">{item.number}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.18em]">
+                    <Icon className="h-4 w-4" />
+                    {item.title}
+                  </span>
+                  <span className="mt-2 block text-xs font-medium text-[#4e4239]">{item.description}</span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0" />
+              </div>
               <span
-                className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-sm ${
-                  active
-                    ? 'border-emerald-400/30 bg-emerald-400 text-slate-950'
-                    : 'border-white/10 bg-white/5 text-slate-300 group-hover:text-white'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-              </span>
-              <span>
-                <span className="block font-medium">{item.label}</span>
-                <span className="mt-1 block text-xs text-slate-400">{item.description}</span>
-              </span>
+                className={`absolute inset-x-4 bottom-3 h-[2px] rounded-full bg-[#1f1814]/20 transition ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-60'}`}
+              />
             </button>
           )
         })}
       </nav>
-
-      <div className="mt-6 rounded-[28px] border border-sky-400/15 bg-sky-400/8 p-4">
-        <p className="text-xs uppercase tracking-[0.28em] text-sky-200/70">Product lens</p>
-        <p className="mt-2 text-sm leading-6 text-slate-200">
-          The live frontend uses the backend directly. There are no local mock fallbacks in the
-          production surfaces.
-        </p>
-      </div>
     </aside>
   )
 }
 
-function TopBar({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+function BackgroundBlobs() {
   return (
-    <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/75 px-5 py-4 backdrop-blur-xl lg:px-8">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Virel workspace</p>
-          <div className="mt-2 flex items-center gap-3">
-            <h1 className="font-display text-3xl tracking-tight text-white lg:text-4xl">{view}</h1>
-            <span className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-300 sm:inline-flex">
-              Corporate UI
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button className={secondaryButton} onClick={() => onChange('Projects')} type="button">
-            <FolderKanban className="h-4 w-4" />
-            Projects
-          </button>
-          <button className={primaryButton} onClick={() => onChange('Campaigns')} type="button">
-            <Sparkles className="h-4 w-4" />
-            Generate
-          </button>
-        </div>
-      </div>
-    </header>
+    <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden">
+      <div className="absolute -left-28 top-24 h-72 w-72 rounded-full bg-[#f5c8d8]/45 blur-3xl" />
+      <div className="absolute right-0 top-10 h-96 w-96 rounded-full bg-[#bcd7ff]/40 blur-3xl" />
+      <div className="absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-[#d9f2e4]/45 blur-3xl" />
+    </div>
   )
 }
 
@@ -213,214 +209,266 @@ function DashboardView({ onNavigate }: { onNavigate: (view: View) => void }) {
   const analytics = analyticsState.data
   const platforms = platformsState.data ?? []
 
-  if (loading) {
-    return <LoadingGrid />
-  }
+  if (loading) return <LoadingGrid />
 
   if (error) {
     const retry = projectsState.error ? projectsState.retry : campaignsState.error ? campaignsState.retry : analyticsState.error ? analyticsState.retry : platformsState.retry
-    return <ErrorState title="The dashboard could not load." message={error} retry={retry} />
+    return <ErrorState title="The launch board could not load." message={error} retry={retry} />
   }
 
   if (!analytics) {
-    return <EmptyState title="No backend data yet." description="Create a project and generate a campaign to populate the workspace." />
+    return <EmptyState title="No content yet." description="Create a project and generate a campaign to see the workspace come alive." />
   }
 
   const latestProject = projects[0]
   const latestCampaign = campaigns[0]
-  const featuredPlatform = analytics.platforms[0]
+  const topPlatform = analytics.platforms[0]
 
   return (
     <div className="space-y-6">
-      <section className={`${panelClass} overflow-hidden relative`}>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.18),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.12),transparent_28%)]" />
-        <div className="relative grid gap-6 xl:grid-cols-[1.2fr_0.8fr] xl:items-center">
-          <div>
-            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/80">AI marketing infrastructure</p>
-            <h2 className="mt-4 max-w-3xl font-display text-4xl tracking-tight text-white sm:text-5xl">
-              Launch student projects with a real backend, a polished surface, and zero fake data.
-            </h2>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
-              Projects, campaigns, analytics, and guided automation all come from the backend now.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button className={primaryButton} onClick={() => onNavigate('Projects')} type="button">
-                Create project
-                <ArrowRight className="h-4 w-4" />
-              </button>
-              <button className={secondaryButton} onClick={() => onNavigate('Campaigns')} type="button">
-                Generate campaign
-              </button>
-              <button className={ghostButton} onClick={() => onNavigate('Automation')} type="button">
-                Setup assistant
-              </button>
-            </div>
-          </div>
+      <div className="grid gap-6 xl:grid-cols-[1.04fr_0.96fr]">
+      <section className={`${paperCard} relative overflow-hidden p-6 sm:p-8`}>
+        <div className="absolute right-0 top-0 h-24 w-24 rounded-bl-[32px] border-l-[2px] border-b-[2px] border-[#2c211b] bg-[#fde2cf]" />
+        <p className="inline-flex rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-2 text-xs font-black uppercase tracking-[0.28em] shadow-[6px_6px_18px_rgba(45,33,26,0.06)]">
+          Workspace overview
+        </p>
+        <h2 className="font-display mt-6 max-w-2xl text-4xl font-black tracking-tight text-[#1f1814] sm:text-5xl">
+          Main features in one workspace.
+        </h2>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {['Projects', 'Campaigns', 'Analytics', 'Automation', 'Settings'].map((item) => (
+            <span
+              key={item}
+              className="rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-2 text-xs font-black uppercase tracking-[0.24em] text-[#1f1814] shadow-[4px_4px_12px_rgba(45,33,26,0.04)]"
+            >
+              {item}
+            </span>
+          ))}
+        </div>
 
-          <div className="grid gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MetricTile label="Projects" value={analytics.summary.totalProjects.toString()} icon={BriefcaseBusiness} />
-              <MetricTile label="Active campaigns" value={analytics.summary.activeCampaigns.toString()} icon={Sparkles} />
-              <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={ChartColumn} />
-              <MetricTile label="CTR" value={`${analytics.summary.ctr}%`} icon={LineChart} />
-            </div>
-            <div className="rounded-[28px] border border-white/10 bg-slate-950/60 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Best platform</p>
-                  <h3 className="mt-1 font-display text-2xl tracking-tight text-white">
-                    {featuredPlatform?.platform ?? 'N/A'}
-                  </h3>
-                </div>
-                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
-                  {featuredPlatform ? `${featuredPlatform.growth}% growth` : 'Live'}
-                </span>
-              </div>
-              <p className="mt-4 text-sm leading-6 text-slate-300">
-                {featuredPlatform
-                  ? `The backend currently reports ${featuredPlatform.platform} as the strongest channel for this workspace.`
-                  : 'The analytics service will fill this in once the backend has campaign data.'}
-              </p>
-              <div className="mt-5 flex items-center gap-2 text-sm text-slate-300">
-                <Clock3 className="h-4 w-4 text-emerald-300" />
-                Updated moments ago from the live API
-              </div>
-            </div>
-          </div>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <button className={`${buttonBase} bg-[#d2e5ff] text-[#1f1814] shadow-[6px_6px_18px_rgba(45,33,26,0.08)] hover:brightness-95`} onClick={() => onNavigate('Projects')} type="button">
+            Start project
+            <ArrowRight className="h-4 w-4" />
+          </button>
+          <button className={`${buttonBase} border-[2px] border-[#2c211b] bg-[#f7d9ea] text-[#1f1814] shadow-[6px_6px_18px_rgba(45,33,26,0.06)] hover:brightness-95`} onClick={() => onNavigate('Automation')} type="button">
+            Open setup
+          </button>
+        </div>
+
+        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+          <StatPill label="Projects" value={projects.length.toString()} color="bg-[#d2e5ff]" />
+          <StatPill label="Campaigns" value={campaigns.length.toString()} color="bg-[#fde2cf]" />
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <article className={cardClass}>
-          <SectionHeading
-            eyebrow="Project spotlight"
-            title="Most recent project"
-            action={<button className={ghostButton} onClick={() => onNavigate('Projects')} type="button">Manage projects</button>}
-          />
-          {latestProject ? (
-            <div className="mt-6 space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-display text-2xl tracking-tight text-white">{latestProject.name}</h3>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                    {latestProject.description || latestProject.tagline}
-                  </p>
-                </div>
-                <StatusPill status={latestProject.status} />
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <MiniFact label="Audience" value={latestProject.targetAudience || 'Not set'} />
-                <MiniFact label="Goal" value={latestProject.goal || 'Not set'} />
-                <MiniFact label="Updated" value={formatDateString(latestProject.updatedAt || latestProject.lastUpdated)} />
-              </div>
-              <ProgressMeter value={latestProject.progress} />
-            </div>
-          ) : (
-            <EmptyState
-              title="No project yet"
-              description="Start with a project record so campaign generation has something real to anchor to."
-              compact
-            />
-          )}
-        </article>
+      <MascotPlaceholder />
 
-        <article className={cardClass}>
-          <SectionHeading
-            eyebrow="Campaign snapshot"
-            title="Latest launch plan"
-            action={<button className={ghostButton} onClick={() => onNavigate('Campaigns')} type="button">Open builder</button>}
+      <section className="xl:col-span-2 grid gap-6 xl:grid-cols-[1.12fr_0.88fr]">
+        <article className={`${paperCard} max-h-[430px] overflow-hidden p-6 sm:p-7`}>
+          <SectionHeader
+            eyebrow="Launch ribbon"
+            title="What the studio sees right now"
+            action={
+              <DashboardAction onClick={() => onNavigate('Analytics')} tone="blue">
+                See more
+                <ArrowRight className="h-4 w-4" />
+              </DashboardAction>
+            }
           />
-          {latestCampaign ? (
-            <div className="mt-6 space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-display text-2xl tracking-tight text-white">{latestCampaign.name}</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">
-                    {latestCampaign.summary || latestCampaign.audience || latestCampaign.goal}
-                  </p>
-                </div>
-                <StatusPill status={latestCampaign.status} />
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <MiniFact label="Platforms" value={latestCampaign.platforms.join(', ') || 'Not set'} />
-                <MiniFact label="Tone" value={latestCampaign.tone || 'Confident'} />
-                <MiniFact label="Goal" value={latestCampaign.goal} />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {latestCampaign.days.slice(0, 3).map((day) => (
-                  <div key={day.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Day {day.day}</p>
-                    <p className="mt-2 font-medium text-white">{day.title}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-300">{day.content}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <EmptyState
-              title="No campaign yet"
-              description="Generate a campaign from a project to unlock the campaign snapshot."
-              compact
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <DataCard
+              label="Best platform"
+              value={topPlatform?.platform ?? 'N/A'}
+              detail={
+                topPlatform
+                  ? `${formatNumber(topPlatform.likes)} likes · ${formatNumber(topPlatform.comments)} comments`
+                  : 'No analytics yet'
+              }
             />
-          )}
-        </article>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Backend coverage" title="Live surfaces" />
-          <div className="mt-5 grid gap-3">
-            {[
-              ['Projects', projects.length],
-              ['Campaigns', campaigns.length],
-              ['Platforms', platforms.length],
-            ].map(([label, value]) => (
-              <div key={label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <span className="text-sm text-slate-300">{label}</span>
-                <span className="text-lg font-semibold text-white">{value}</span>
-              </div>
-            ))}
+            <DataCard
+              label="Latest project"
+              value={latestProject?.name ?? 'None'}
+              detail={latestProject?.description || latestProject?.tagline || 'Create one to begin.'}
+            />
+            <DataCard
+              label="Latest campaign"
+              value={latestCampaign?.name ?? 'None'}
+              detail={latestCampaign?.summary || latestCampaign?.goal || 'Generate one to begin.'}
+            />
           </div>
         </article>
 
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Activity" title="Engagement timeline" />
-          <div className="mt-5">
-            <TimelineChart points={analytics.timeline} />
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Platform cloud" title="Supported platforms" />
+          <div className="mt-6 flex flex-wrap gap-2">
+            {platforms.length > 0 ? (
+              platforms.map((platform) => (
+                <span
+                  key={platform.id}
+                  className="rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-2 text-xs font-black shadow-[4px_4px_12px_rgba(45,33,26,0.04)]"
+                >
+                  {platform.name}
+                </span>
+              ))
+            ) : (
+              <EmptyState compact title="No supported platforms yet." description="Connected platforms will appear here when available." />
+            )}
           </div>
         </article>
       </section>
+    </div>
+    </div>
+  )
+}
+
+function MascotPlaceholder() {
+  return (
+    <section className={`${paperCard} relative min-h-[620px] overflow-hidden p-5 sm:p-6`}>
+      <div className="absolute left-5 right-5 top-5 h-3 rounded-full bg-[#b9d6ff] shadow-[0_0_0_2px_rgba(44,33,27,0.08)]" />
+      <div className="absolute left-5 right-5 top-12 h-[2px] rounded-full bg-[#2c211b]/12" />
+
+      <div className="absolute left-6 top-6 rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-2 text-xs font-black uppercase tracking-[0.28em] shadow-[6px_6px_18px_rgba(45,33,26,0.06)]">
+        Mascot video
+      </div>
+
+      <div className="absolute inset-x-10 top-[88px] bottom-[72px] rounded-[38px] border-[2px] border-dashed border-[#2c211b]/35 bg-white/55 shadow-[0_0_0_1px_rgba(255,255,255,0.6),inset_0_0_80px_rgba(255,255,255,0.35)] backdrop-blur-[2px]">
+        <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+          <div className="grid h-16 w-16 place-items-center rounded-full border-[2px] border-[#2c211b] bg-white text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+            ▶
+          </div>
+          <p className="font-display mt-5 text-2xl font-black tracking-tight text-[#1f1814]">
+            Mascot video placeholder
+          </p>
+          <p className="mt-3 max-w-md text-sm leading-6 text-[#5f554a]">
+            Drop your mascot video here later.
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function DashboardAction({
+  children,
+  onClick,
+  tone = 'dark',
+}: {
+  children: ReactNode
+  onClick: () => void
+  tone?: 'dark' | 'coral' | 'blue'
+}) {
+  const classes =
+    tone === 'dark'
+      ? 'bg-[#2c211b] text-[#fffaf4] hover:bg-[#3a2d24]'
+      : tone === 'coral'
+        ? 'bg-[#f7d9ea] text-[#1f1814] hover:brightness-95'
+        : 'bg-[#d2e5ff] text-[#1f1814] hover:brightness-95'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${buttonBase} border-[2px] border-[#2c211b] shadow-[6px_6px_16px_rgba(45,33,26,0.06)] ${classes}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function StatPill({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <div className={`rounded-[28px] border-[2px] border-[#2c211b] p-5 text-[#1f1814] shadow-[8px_8px_18px_rgba(45,33,26,0.06)] ${color}`}>
+      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#5f554a]">{label}</p>
+      <p className="font-display mt-4 text-4xl font-black tracking-tight">{value}</p>
+    </div>
+  )
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow: string
+  title: string
+  description?: string
+  action?: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.34em] text-[#7ea8ff]">{eyebrow}</p>
+        <h2 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">{title}</h2>
+        {description && <p className="mt-3 max-w-3xl text-sm leading-6 text-[#5f554a]">{description}</p>}
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  )
+}
+
+function DataCard({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: string
+  detail: string
+}) {
+  return (
+    <div className="rounded-[28px] border-[2px] border-[#2c211b] bg-white p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#b97fd6]">{label}</p>
+      <p className="font-display mt-3 text-2xl font-black tracking-tight text-[#1f1814]">{value}</p>
+      <p
+        className="mt-3 text-sm leading-6 text-[#5f554a]"
+        style={{
+          display: '-webkit-box',
+          WebkitBoxOrient: 'vertical',
+          WebkitLineClamp: 4,
+          overflow: 'hidden',
+        }}
+      >
+        {detail}
+      </p>
     </div>
   )
 }
 
 function ProjectsView() {
   const projectsState = useAsync(getProjects)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'All'>('All')
+  const campaignsState = useAsync(getCampaigns)
+  const automationSessionsState = useAsync(getAutomationSessions)
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState<ProjectStatus | 'All'>('All')
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+
   const projects = projectsState.data ?? []
-
-  const filtered = useMemo(() => {
-    return projects.filter((project) => {
-      const haystack = [
-        project.name,
-        project.description,
-        project.tagline,
-        project.targetAudience,
-        project.goal,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-
-      const matchesSearch = haystack.includes(search.toLowerCase())
-      const matchesStatus = statusFilter === 'All' || project.status === statusFilter
-      return matchesSearch && matchesStatus
-    })
-  }, [projects, search, statusFilter])
+  const campaigns = campaignsState.data ?? []
+  const automationSessions = automationSessionsState.data ?? []
+  const filtered = useMemo(
+    () =>
+      projects.filter((project) => {
+        const haystack = [project.name, project.description, project.tagline, project.targetAudience, project.goal]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return haystack.includes(query.toLowerCase()) && (status === 'All' || project.status === status)
+      }),
+    [projects, query, status],
+  )
+  const projectProgress = (project: Project) => calculateLaunchProgress(project, campaigns, automationSessions)
 
   async function handleSave(input: ProjectInput) {
     setActionError(null)
@@ -429,12 +477,11 @@ function ProjectsView() {
         const updated = await updateProject(editingProject.id, input)
         projectsState.setData(projects.map((project) => (project.id === updated.id ? updated : project)))
         setEditingProject(null)
-        return
+      } else {
+        const created = await createProject(input)
+        projectsState.setData([created, ...projects])
+        setIsCreating(false)
       }
-
-      const created = await createProject(input)
-      projectsState.setData([created, ...projects])
-      setIsCreating(false)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Project save failed.')
     }
@@ -450,62 +497,59 @@ function ProjectsView() {
     }
   }
 
-  if (projectsState.isLoading) {
-    return <LoadingGrid />
-  }
-
-  if (projectsState.error) {
-    return <ErrorState title="Projects could not load." message={projectsState.error} retry={projectsState.retry} />
+  if (projectsState.isLoading || campaignsState.isLoading || automationSessionsState.isLoading) return <LoadingGrid />
+  const error = projectsState.error || campaignsState.error || automationSessionsState.error
+  if (error) {
+    const retry = projectsState.error ? projectsState.retry : campaignsState.error ? campaignsState.retry : automationSessionsState.retry
+    return <ErrorState title="Projects could not load." message={error} retry={retry} />
   }
 
   return (
     <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader
           eyebrow="Projects"
-          title="Manage project records from the backend"
-          description="Create the official project profile first. Campaign generation and automation can hang off this record."
-          action={
-            <button className={primaryButton} onClick={() => setIsCreating(true)} type="button">
-              <Plus className="h-4 w-4" />
-              New project
-            </button>
-          }
+          title="Project hub"
+          description="Each project gets its own branded identity card with the details you need at a glance."
+          action={<DashboardAction onClick={() => setIsCreating(true)} tone="coral"> <Plus className="h-4 w-4" /> New project</DashboardAction>}
         />
-        <div className="mt-6 grid gap-3 lg:grid-cols-[1.5fr_0.5fr]">
-          <input
-            aria-label="Search projects"
-            className={inputClass}
-            placeholder="Search by name, goal, or audience"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
+        <div className="mt-6 grid gap-3 lg:grid-cols-[1.4fr_0.6fr]">
+          <label className="block">
+            <span className="sr-only">Search projects</span>
+            <div className="flex items-center gap-3 rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-3 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+              <Search className="h-4 w-4 text-[#b97fd6]" />
+              <input
+                className="w-full bg-transparent text-sm font-medium text-[#1f1814] outline-none placeholder:text-[#8b8177]"
+                placeholder="Search by name, goal, or audience"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+          </label>
           <select
-            aria-label="Filter by status"
-            className={selectClass}
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as ProjectStatus | 'All')}
+            className="rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.04)] outline-none"
+            value={status}
+            onChange={(event) => setStatus(event.target.value as ProjectStatus | 'All')}
           >
             <option>All</option>
-            {PROJECT_STATUS_OPTIONS.map((status) => (
-              <option key={status}>{status}</option>
+            {PROJECT_STATUS_OPTIONS.map((option) => (
+              <option key={option}>{option}</option>
             ))}
           </select>
         </div>
-        {actionError && <p className="mt-4 text-sm text-rose-300">{actionError}</p>}
+        {actionError && <p className="mt-4 text-sm font-medium text-[#b97fd6]">{actionError}</p>}
       </section>
 
       {filtered.length === 0 ? (
-        <EmptyState
-          title="No projects match the filters."
-          description="Create a project or clear the search field to continue."
-        />
+        <EmptyState title="No projects match the filters." description="Create a project or clear the search to continue." />
       ) : (
         <div className="grid gap-5 xl:grid-cols-2">
-          {filtered.map((project) => (
+          {filtered.map((project, index) => (
             <ProjectCard
               key={project.id}
               project={project}
+              accent={NAV_ITEMS[index % NAV_ITEMS.length].color}
+              progress={projectProgress(project)}
               onDelete={handleDelete}
               onEdit={setEditingProject}
             />
@@ -514,7 +558,7 @@ function ProjectsView() {
       )}
 
       {(isCreating || editingProject) && (
-        <ProjectEditorModal
+        <ProjectModal
           initial={editingProject ?? undefined}
           onCancel={() => {
             setIsCreating(false)
@@ -524,6 +568,72 @@ function ProjectsView() {
         />
       )}
     </div>
+  )
+}
+
+function ProjectCard({
+  project,
+  accent,
+  progress,
+  onDelete,
+  onEdit,
+}: {
+  project: Project
+  accent: string
+  progress: number
+  onDelete: (id: string) => Promise<void>
+  onEdit: (project: Project) => void
+}) {
+  return (
+    <article className={`${paperCard} overflow-hidden`}>
+      <div className={`h-4 ${accent}`} />
+      <div className="p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.32em] text-[#b97fd6]">Project</p>
+            <h3 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">{project.name}</h3>
+          </div>
+          <StatusBadge status={project.status} />
+        </div>
+
+        <p className="mt-4 max-w-2xl text-sm leading-6 text-[#5f554a]">{project.description || project.tagline}</p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <MiniStat label="Audience" value={project.targetAudience || 'Not set'} />
+          <MiniStat label="Goal" value={project.goal || 'Not set'} />
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <ProgressBar value={progress} />
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#6b625a]">
+            Updated {formatDate(project.updatedAt || project.lastUpdated)}
+          </p>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          {project.repoUrl && (
+            <a className={secondaryLink} href={project.repoUrl} target="_blank" rel="noreferrer">
+              <ExternalLink className="h-4 w-4" />
+              Repo
+            </a>
+          )}
+          {project.demoUrl && (
+            <a className={secondaryLink} href={project.demoUrl} target="_blank" rel="noreferrer">
+              <Globe2 className="h-4 w-4" />
+              Demo
+            </a>
+          )}
+          <button className={secondaryLink} type="button" onClick={() => onEdit(project)}>
+            <PencilLine className="h-4 w-4" />
+            Edit
+          </button>
+          <button className={secondaryLink} type="button" onClick={() => void onDelete(project.id)}>
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </button>
+        </div>
+      </div>
+    </article>
   )
 }
 
@@ -541,13 +651,11 @@ function CampaignsView() {
   const projects = projectsState.data ?? []
   const campaigns = campaignsState.data ?? []
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
-
-  const campaignPreview = generatedCampaign ?? campaigns[0]
+  const previewCampaign = generatedCampaign ?? campaigns[0]
 
   async function handleGenerate() {
     if (!selectedProject || platforms.length === 0) return
     setActionError(null)
-
     try {
       const payload: GenerateCampaignInput = {
         projectId: selectedProject.id,
@@ -556,7 +664,6 @@ function CampaignsView() {
         tone,
         title: title || `${selectedProject.name} launch sprint`,
       }
-
       const campaign = await generateCampaign(payload)
       setGeneratedCampaign(campaign)
       campaignsState.setData([campaign, ...campaigns])
@@ -571,42 +678,28 @@ function CampaignsView() {
     )
   }
 
-  if (projectsState.isLoading || campaignsState.isLoading) {
-    return <LoadingGrid />
-  }
-
-  if (projectsState.error) {
-    return <ErrorState title="Projects are required before campaign generation." message={projectsState.error} retry={projectsState.retry} />
-  }
-
-  if (campaignsState.error) {
-    return <ErrorState title="Campaigns could not load." message={campaignsState.error} retry={campaignsState.retry} />
-  }
-
+  if (projectsState.isLoading || campaignsState.isLoading) return <LoadingGrid />
+  if (projectsState.error) return <ErrorState title="Projects are required before campaigns." message={projectsState.error} retry={projectsState.retry} />
+  if (campaignsState.error) return <ErrorState title="Campaigns could not load." message={campaignsState.error} retry={campaignsState.retry} />
   if (!selectedProject) {
-    return (
-      <EmptyState
-        title="Create a project first"
-        description="Campaigns are generated from a project record. Add one in the Projects section to continue."
-      />
-    )
+    return <EmptyState title="Create a project first" description="Campaign generation needs a project record to anchor to." />
   }
 
   return (
     <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
-          eyebrow="Campaign builder"
-          title="Generate a launch plan from the backend"
-          description="The backend assembles the campaign days and posts. This view simply directs the brief."
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader
+          eyebrow="Campaigns"
+          title="Campaigns"
+          description="Pick a project, set the tone, and shape the 7-day plan."
         />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-          <div className={cardClass}>
+        <div className="mt-6 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className={`${insetCard} p-5`}>
             <div className="grid gap-4">
               <label className="block">
-                <span className="text-sm font-medium text-slate-200">Project</span>
+                <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Project</span>
                 <select
-                  className={selectClass}
+                  className="mt-2 w-full rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.04)] outline-none"
                   value={selectedProject.id}
                   onChange={(event) => setSelectedProjectId(event.target.value)}
                 >
@@ -619,109 +712,105 @@ function CampaignsView() {
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-200">Title</span>
-                <input
-                  className={inputClass}
-                  placeholder={`${selectedProject.name} launch sprint`}
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                />
+                <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Title</span>
+                <input className={inputField} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={`${selectedProject.name} launch sprint`} />
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-200">Goal</span>
-                <input className={inputClass} value={goal} onChange={(event) => setGoal(event.target.value)} />
+                <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Goal</span>
+                <input className={inputField} value={goal} onChange={(event) => setGoal(event.target.value)} />
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="text-sm font-medium text-slate-200">Tone</span>
-                  <select className={selectClass} value={tone} onChange={(event) => setTone(event.target.value)}>
+                  <span className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Tone</span>
+                  <select className={inputField} value={tone} onChange={(event) => setTone(event.target.value)}>
                     {TONE_OPTIONS.map((option) => (
                       <option key={option}>{option}</option>
                     ))}
                   </select>
                 </label>
-
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-sm font-medium text-slate-200">Platforms</p>
-                  <p className="mt-1 text-xs text-slate-400">Choose the channels the backend should plan for.</p>
+                <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                  <p className="text-xs font-black uppercase tracking-[0.28em] text-[#b97fd6]">Platforms</p>
+                  <p className="mt-2 text-sm leading-6 text-[#5f554a]">Choose the channels you want to include in the plan.</p>
                 </div>
               </div>
 
               <PlatformChooser selected={platforms} onToggle={togglePlatform} />
 
-              <button className={primaryButton} onClick={() => void handleGenerate()} type="button">
+                <button className={`${buttonBase} border-[2px] border-[#2c211b] bg-[#2c211b] text-[#fffaf4] shadow-[6px_6px_16px_rgba(45,33,26,0.06)] hover:bg-[#3a2d24]`} onClick={() => void handleGenerate()} type="button">
                 <Sparkles className="h-4 w-4" />
                 Generate campaign
               </button>
+
+              {actionError && <p className="text-sm font-medium text-[#b97fd6]">{actionError}</p>}
             </div>
           </div>
 
-          <div className={cardClass}>
-            <SectionHeading eyebrow="Generated output" title="Campaign preview" />
-            {campaignPreview ? (
-              <div className="mt-5 space-y-5">
+          <div className={`${paperCard} p-5`}>
+            <SectionHeader eyebrow="Preview" title="Campaign reel" />
+            {previewCampaign ? (
+              <div className="mt-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-display text-2xl tracking-tight text-white">{campaignPreview.name}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-300">
-                      {campaignPreview.summary || campaignPreview.audience || campaignPreview.goal}
+                    <h3 className="font-display text-3xl font-black tracking-tight text-[#1f1814]">{previewCampaign.name}</h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-[#51463f]">
+                      {previewCampaign.summary || previewCampaign.audience || previewCampaign.goal}
                     </p>
                   </div>
-                  <StatusPill status={campaignPreview.status} />
+                  <StatusBadge status={previewCampaign.status} />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <MiniFact label="Project" value={selectedProject.name} />
-                  <MiniFact label="Platforms" value={campaignPreview.platforms.join(', ') || 'Not set'} />
-                  <MiniFact label="Tone" value={campaignPreview.tone || tone} />
+                  <MiniStat label="Project" value={selectedProject.name} />
+                  <MiniStat label="Platforms" value={previewCampaign.platforms.join(', ') || 'Not set'} />
+                  <MiniStat label="Tone" value={previewCampaign.tone || tone} />
                 </div>
 
-                <div className="space-y-3">
-                  {campaignPreview.days.slice(0, 4).map((day) => (
-                    <div key={day.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="grid gap-3">
+                  {previewCampaign.days.slice(0, 4).map((day) => (
+                    <div key={day.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Day {day.day}</p>
-                        <span className="rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 text-xs text-slate-300">
+                        <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Day {day.day}</p>
+                        <span className="rounded-full border-[2px] border-[#2c211b] bg-white px-3 py-1 text-xs font-black uppercase tracking-[0.22em]">
                           {day.status}
                         </span>
                       </div>
-                      <p className="mt-2 font-medium text-white">{day.title}</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-300">{day.content}</p>
+                      <p className="mt-2 text-lg font-black text-[#1f1814]">{day.title}</p>
+                      <p className="mt-2 text-sm leading-6 text-[#5f554a]">{day.content}</p>
                     </div>
                   ))}
                 </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button className={secondaryButton} onClick={() => setGeneratedCampaign(campaignPreview)} type="button">
-                    Keep preview
-                  </button>
-                  <button className={ghostButton} onClick={() => setTitle('')} type="button">
-                    Reset title
-                  </button>
-                </div>
               </div>
             ) : (
-              <EmptyState
-                title="Your campaign preview appears here."
-                description="Generate once to render the backend-created days and posts."
-                compact
-              />
+              <EmptyState title="No campaign yet." description="Generate one to see the plan expand." compact />
             )}
           </div>
         </div>
-        {actionError && <p className="mt-4 text-sm text-rose-300">{actionError}</p>}
       </section>
 
-      <section className={cardClass}>
-        <SectionHeading eyebrow="Existing campaigns" title="Launch history" />
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader eyebrow="Campaign history" title="Recent launch routes" />
         {campaigns.length === 0 ? (
-          <EmptyState title="No campaigns yet." description="Generate the first campaign to populate this list." compact />
+          <EmptyState title="No campaigns yet." description="Generate the first campaign to populate this shelf." compact />
         ) : (
           <div className="mt-5 grid gap-4 xl:grid-cols-2">
             {campaigns.map((campaign) => (
-              <CampaignCard key={campaign.id} campaign={campaign} />
+              <div key={campaign.id} className="rounded-[28px] border-[2px] border-[#2c211b] bg-white p-5 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Campaign</p>
+                    <h3 className="font-display mt-2 text-2xl font-black tracking-tight text-[#1f1814]">{campaign.name}</h3>
+                  </div>
+                  <StatusBadge status={campaign.status} />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-[#5f554a]">{campaign.summary || campaign.audience || campaign.goal}</p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <MiniStat label="Goal" value={campaign.goal} />
+                  <MiniStat label="Tone" value={campaign.tone || 'Confident'} />
+                  <MiniStat label="Platforms" value={campaign.platforms.join(', ')} />
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -730,118 +819,137 @@ function CampaignsView() {
   )
 }
 
+function PlatformChooser({
+  selected,
+  onToggle,
+}: {
+  selected: PlatformName[]
+  onToggle: (platform: PlatformName) => void
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      {platformNames.map((platform) => {
+        const active = selected.includes(platform)
+        return (
+          <button
+            key={platform}
+            type="button"
+            onClick={() => onToggle(platform)}
+            className={`rounded-[22px] border-[2px] border-[#2c211b] px-4 py-3 text-left text-sm font-black uppercase tracking-[0.12em] shadow-[4px_4px_12px_rgba(45,33,26,0.04)] transition hover:-translate-y-0.5 ${
+              active ? 'bg-[#d9f1e5] text-[#1f1814]' : 'bg-white text-[#1f1814]'
+            }`}
+          >
+            {platform}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function AnalyticsView() {
   const analyticsState = useAsync(getAnalytics)
-  const campaignsState = useAsync(getCampaigns)
-  const projectsState = useAsync(getProjects)
-
   const analytics = analyticsState.data
-  const campaigns = campaignsState.data ?? []
-  const projects = projectsState.data ?? []
+  const loading = analyticsState.isLoading
+  const error = analyticsState.error
 
-  const loading = analyticsState.isLoading || campaignsState.isLoading || projectsState.isLoading
-  const error = analyticsState.error || campaignsState.error || projectsState.error
-
-  if (loading) {
-    return <LoadingGrid />
-  }
-
+  if (loading) return <LoadingGrid />
   if (error) {
-    const retry = analyticsState.error ? analyticsState.retry : campaignsState.error ? campaignsState.retry : projectsState.retry
-    return <ErrorState title="Analytics could not load." message={error} retry={retry} />
+    return <ErrorState title="Analytics could not load." message={error} retry={analyticsState.retry} />
   }
+  if (!analytics) return <EmptyState title="No analytics available yet." description="Generate a campaign and the report cards will fill in." />
 
-  if (!analytics) {
-    return (
-      <EmptyState
-        title="No analytics available yet."
-        description="Generate a campaign and the backend will begin returning performance data."
-      />
-    )
-  }
-
-  const recentPosts = campaigns[0]?.posts.slice(0, 4) ?? []
+  const topPosts = analytics.topPosts.slice(0, 4)
 
   return (
     <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader
           eyebrow="Analytics"
-          title="Measure what the backend sees"
-          description="The summary and timeline are live API responses. Post-level performance will fill in as more backend data is added."
+          title="Analytics"
+          description="Live platform stats, timeline performance, and the strongest posts in one place."
         />
         <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricTile label="Projects" value={projects.length.toString()} icon={BriefcaseBusiness} />
-          <MetricTile label="Active campaigns" value={analytics.summary.activeCampaigns.toString()} icon={Sparkles} />
-          <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={ChartColumn} />
-          <MetricTile label="CTR" value={`${analytics.summary.ctr}%`} icon={LineChart} />
+          <MetricTile label="Projects" value={analytics.summary.totalProjects.toString()} icon={FolderKanban} tone="blue" />
+          <MetricTile label="Campaigns" value={analytics.summary.activeCampaigns.toString()} icon={Sparkles} tone="yellow" />
+          <MetricTile label="Engagement" value={formatNumber(analytics.summary.engagement)} icon={BarChart3} tone="green" />
+          <MetricTile label="CTR" value={`${analytics.summary.ctr}%`} icon={LineChart} tone="purple" />
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Timeline" title="Engagement over time" />
-          <div className="mt-5">
-            <TimelineChart points={analytics.timeline} />
+      <section className="grid gap-6 xl:grid-cols-[1.04fr_0.96fr]">
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Timeline" title="Engagement over time" />
+          <div className="mt-5 space-y-4">
+            {analytics.timeline.map((point) => (
+              <div key={point.label} className="grid grid-cols-[56px_minmax(0,1fr)_72px] items-center gap-3">
+                <span className="text-xs font-black uppercase tracking-[0.28em] text-[#6b625a]">{point.label}</span>
+                <div className="h-4 rounded-full border-[2px] border-[#2c211b] bg-white">
+                  <div className="h-full rounded-full bg-[#f7d9ea]" style={{ width: `${Math.min((point.engagement / Math.max(analytics.summary.engagement, 1)) * 100, 100)}%` }} />
+                </div>
+                <span className="text-right text-sm font-black text-[#1f1814]">{formatNumber(point.engagement)}</span>
+              </div>
+            ))}
           </div>
         </article>
 
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Platform mix" title="Best performing platform" />
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Platform mix" title="Best platform" />
           <div className="mt-5 space-y-4">
             {analytics.platforms.map((platform) => (
-              <div key={platform.platform} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium text-white">{platform.platform}</span>
-                  <span className="text-sm text-emerald-300">{platform.growth}% growth</span>
+              <div key={platform.platform} className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <span className="font-black text-[#1f1814]">{platform.platform}</span>
+                    <p className="mt-1 text-xs font-black uppercase tracking-[0.22em] text-[#6b625a]">{platform.posts} posts</p>
+                  </div>
+                  <span className="rounded-full border-[2px] border-[#2c211b] bg-[#d9f1e5] px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-[#1f1814]">
+                    {formatNumber(platform.engagement)} engagement
+                  </span>
                 </div>
-                <div className="mt-3 h-2 rounded-full bg-slate-800">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
-                    style={{ width: `${Math.min(platform.engagement / Math.max(analytics.summary.engagement, 1), 1) * 100}%` }}
-                  />
+                <div className="mt-3 grid gap-3 text-sm text-[#5f554a] sm:grid-cols-2">
+                  <p>{formatNumber(platform.likes)} likes</p>
+                  <p>{formatNumber(platform.comments)} comments</p>
+                  <p>{formatNumber(platform.shares)} shares</p>
+                  <p>{formatNumber(platform.clicks)} clicks</p>
                 </div>
               </div>
             ))}
-            {analytics.platforms.length === 0 && (
-              <EmptyState title="No platform breakdown yet." description="The backend will expose more detail as campaigns accumulate." compact />
-            )}
+            {analytics.platforms.length === 0 && <EmptyState title="No platform breakdown yet." description="More detail will appear as campaigns accumulate." compact />}
           </div>
         </article>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Summary" title="Key metrics" />
-          <div className="mt-5 space-y-3">
-            <DataRow label="Best channel" value={analytics.platforms[0]?.platform ?? 'N/A'} />
-            <DataRow label="Projects tracked" value={projects.length.toString()} />
-            <DataRow label="Campaigns tracked" value={campaigns.length.toString()} />
-            <DataRow label="CTR" value={`${analytics.summary.ctr}%`} />
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Summary" title="Quick stats" />
+          <div className="mt-5 grid gap-3">
+            <MiniStat label="Best channel" value={analytics.platforms[0]?.platform ?? 'N/A'} />
+            <MiniStat label="Projects tracked" value={analytics.summary.totalProjects.toString()} />
+            <MiniStat label="Campaigns tracked" value={analytics.summary.activeCampaigns.toString()} />
           </div>
         </article>
 
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Recent posts" title="Generated content" />
-          {recentPosts.length === 0 ? (
-            <EmptyState title="No generated posts yet." description="Create a campaign to see posts here." compact />
-          ) : (
-            <div className="mt-5 grid gap-3">
-              {recentPosts.map((post) => (
-                <div key={post.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-medium text-white">{post.title}</span>
-                    <StatusPill status={post.status} />
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Recent posts" title="Generated content" />
+            {topPosts.length === 0 ? (
+              <EmptyState title="No posts yet." description="Create a campaign to see posts fill this area." compact />
+            ) : (
+              <div className="mt-5 grid gap-3">
+                {topPosts.map((post) => (
+                  <div key={post.id} className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-black text-[#1f1814]">{post.title}</span>
+                      <span className="rounded-full border-[2px] border-[#2c211b] bg-[#fff0bc] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
+                        {post.platform}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-[#5f554a]">
+                      {formatNumber(post.likes)} likes · {formatNumber(post.comments)} comments · {formatNumber(post.clicks)} clicks
+                    </p>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">{post.content}</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                    <span>{post.platform}</span>
-                    <span>•</span>
-                    <span>{post.engagementEstimate}% fit</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
           )}
         </article>
       </section>
@@ -854,8 +962,8 @@ function AutomationView() {
   const projectsState = useAsync(getProjects)
   const [selectedPlatformId, setSelectedPlatformId] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [username, setUsername] = useState('@studysnapai')
-  const [bio, setBio] = useState('Study smarter, not harder.')
+  const [username, setUsername] = useState('@virel')
+  const [bio, setBio] = useState('Build and launch student projects faster.')
   const [profileImageUrl, setProfileImageUrl] = useState('')
   const [accountUrl, setAccountUrl] = useState('')
   const [notes, setNotes] = useState('Prepare the brand assets, then walk the user through verification.')
@@ -882,7 +990,6 @@ function AutomationView() {
           notes,
         },
       })
-
       setSessions((current) => [session, ...current])
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : 'Automation connect failed.')
@@ -907,155 +1014,132 @@ function AutomationView() {
           notes,
         },
       })
-
       setSessions((current) => [session, ...current])
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : 'Automation session creation failed.')
     }
   }
 
-  if (platformsState.isLoading || projectsState.isLoading) {
-    return <LoadingGrid />
-  }
-
-  if (platformsState.error) {
-    return <ErrorState title="Automation catalog could not load." message={platformsState.error} retry={platformsState.retry} />
-  }
-
-  if (projectsState.error) {
-    return <ErrorState title="Projects are required for automation." message={projectsState.error} retry={projectsState.retry} />
-  }
-
-  if (!selectedPlatform || !selectedProject) {
-    return (
-      <EmptyState
-        title="Create a project first"
-        description="Automation sessions need a project and a supported platform."
-      />
-    )
-  }
+  if (platformsState.isLoading || projectsState.isLoading) return <LoadingGrid />
+  if (platformsState.error) return <ErrorState title="Automation catalog could not load." message={platformsState.error} retry={platformsState.retry} />
+  if (projectsState.error) return <ErrorState title="Projects are required for automation." message={projectsState.error} retry={projectsState.retry} />
+  if (!selectedPlatform || !selectedProject) return <EmptyState title="Create a project first" description="Automation sessions need a project and a supported platform." />
 
   return (
     <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader
           eyebrow="Automation"
-          title="Guided setup, backed by the real API"
-          description="These requests create automation sessions on the backend. The browser automation layer can pick them up later."
+          title="Automation"
+          description="Create connection sessions for branded account setup. The user still approves every verification step."
         />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <div className="grid gap-3">
-            {platforms.map((platform) => (
+            {platforms.map((platform, index) => (
               <button
                 key={platform.id}
-                className={`text-left ${softCardClass} transition hover:border-white/20 hover:bg-white/10 ${
-                  selectedPlatform.id === platform.id ? 'border-emerald-400/30 bg-emerald-400/10' : ''
-                }`}
-                onClick={() => setSelectedPlatformId(platform.id)}
                 type="button"
+                onClick={() => setSelectedPlatformId(platform.id)}
+                className={`rounded-[26px] border-[2px] border-[#2c211b] px-4 py-4 text-left shadow-[6px_6px_16px_rgba(45,33,26,0.05)] transition hover:-translate-y-0.5 ${
+                  selectedPlatform.id === platform.id ? NAV_ITEMS[index % NAV_ITEMS.length].color + ' text-[#1f1814]' : 'bg-white text-[#1f1814]'
+                }`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-white">{platform.name}</span>
-                      <StatusPill status={platform.status} />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 break-words font-black leading-tight">{platform.name}</span>
+                      <StatusBadge status={platform.status} />
                     </div>
-                    <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
+                    <p className="mt-2 text-sm text-current/80">{platform.username}</p>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                  <ChevronRight className="h-4 w-4" />
                 </div>
-                <p className="mt-3 text-sm leading-6 text-slate-400">{platform.notes || platform.automation}</p>
+                <p className="mt-3 text-sm leading-6 text-current/70">{platform.notes || platform.automation}</p>
               </button>
             ))}
           </div>
 
-          <div className={cardClass}>
-            <SectionHeading
-              eyebrow="Connection brief"
-              title={`Setup ${selectedPlatform.name}`}
-              description="Fill in the brand details, then either queue the session or request a connect run."
-            />
+          <div className={`${insetCard} p-5`}>
+            <SectionHeader eyebrow="Connection brief" title={`Setup ${selectedPlatform.name}`} description="Enter the brand details once, then queue or request the live connect flow." />
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Project</span>
-                <select
-                  className={selectClass}
-                  value={selectedProject.id}
-                  onChange={(event) => setSelectedProjectId(event.target.value)}
-                >
+              <Field label="Project to connect" description="Choose the project this account setup belongs to." className="sm:col-span-2">
+                <select className={inputField} value={selectedProject.id} onChange={(event) => setSelectedProjectId(event.target.value)}>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
                     </option>
                   ))}
                 </select>
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-slate-200">Username</span>
-                <input className={inputClass} value={username} onChange={(event) => setUsername(event.target.value)} />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-slate-200">Account URL</span>
-                <input className={inputClass} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
-              </label>
-
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Bio</span>
-                <textarea className={textareaClass} value={bio} onChange={(event) => setBio(event.target.value)} />
-              </label>
-
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Profile image URL</span>
-                <input
-                  className={inputClass}
-                  value={profileImageUrl}
-                  onChange={(event) => setProfileImageUrl(event.target.value)}
-                  placeholder="https://..."
-                />
-              </label>
-
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Setup notes</span>
-                <textarea className={textareaClass} value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </label>
+              </Field>
+              <Field label="Account username" description="Example: @studysnapai">
+                <input className={inputField} value={username} onChange={(event) => setUsername(event.target.value)} />
+              </Field>
+              <Field label="Account URL" description="Paste the profile URL if the account already exists.">
+                <input className={inputField} value={accountUrl} onChange={(event) => setAccountUrl(event.target.value)} />
+              </Field>
+              <Field label="Profile bio" description="Short account bio shown on the profile page." className="sm:col-span-2">
+                <textarea className={textareaField} value={bio} onChange={(event) => setBio(event.target.value)} />
+              </Field>
+              <Field label="Profile image URL" description="Paste a hosted image URL for the profile photo." className="sm:col-span-2">
+                <input className={inputField} value={profileImageUrl} onChange={(event) => setProfileImageUrl(event.target.value)} placeholder="https://..." />
+              </Field>
+              <Field label="Verification notes" description="Add anything the user should confirm manually during setup." className="sm:col-span-2">
+                <textarea className={textareaField} value={notes} onChange={(event) => setNotes(event.target.value)} />
+              </Field>
             </div>
-
             <div className="mt-5 flex flex-wrap gap-3">
-              <button className={primaryButton} onClick={() => void handleRequestConnection()} type="button">
+              <DashboardAction onClick={() => void handleRequestConnection()} tone="blue">
                 <UserRoundPlus className="h-4 w-4" />
                 Request connect
-              </button>
-              <button className={secondaryButton} onClick={() => void handleQueueSession()} type="button">
+              </DashboardAction>
+              <DashboardAction onClick={() => void handleQueueSession()} tone="coral">
                 <CircleDashed className="h-4 w-4" />
                 Queue session
-              </button>
+              </DashboardAction>
             </div>
-
-            {sessionError && <p className="mt-4 text-sm text-rose-300">{sessionError}</p>}
+            {sessionError && <p className="mt-4 text-sm font-medium text-[#b97fd6]">{sessionError}</p>}
           </div>
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Platform catalog" title="Backend-supported platforms" />
+      <section className="grid gap-6 xl:grid-cols-[1.03fr_0.97fr]">
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Supported platforms" title="Supported platforms" />
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {platforms.map((platform) => (
-              <PlatformCard key={platform.id} platform={platform} selected={selectedPlatform.id === platform.id} />
+              <div key={platform.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <span className="min-w-0 break-words font-black leading-tight text-[#1f1814]">{platform.name}</span>
+                  <StatusBadge status={platform.status} />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-[#5f554a]">{platform.notes || platform.automation}</p>
+                <p className="mt-3 text-xs font-black uppercase tracking-[0.26em] text-[#6b625a]">
+                  {platform.phoneRequired ? 'Phone may be required' : 'Email-friendly'}
+                </p>
+              </div>
             ))}
           </div>
         </article>
 
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Session log" title="Recent automation requests" />
+        <article className={`${paperCard} p-6 sm:p-7`}>
+          <SectionHeader eyebrow="Session log" title="Recent requests" />
           {sessions.length === 0 ? (
-            <EmptyState title="No sessions yet." description="Request or queue a setup to see the real backend response here." compact />
+            <EmptyState title="No sessions yet." description="Request or queue a setup to see the session response here." compact />
           ) : (
             <div className="mt-5 space-y-3">
               {sessions.map((session) => (
-                <SessionCard key={session.id} session={session} />
+                <div key={session.id} className="rounded-[24px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+                  <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">{session.platform}</p>
+                    <p className="mt-2 font-black text-[#1f1814]">{session.step}</p>
+                  </div>
+                    <StatusBadge status={session.status} />
+                  </div>
+                  <div className="mt-3 h-3 rounded-full border-[2px] border-[#2c211b] bg-white">
+                    <div className="h-full rounded-full bg-[#d9f1e5]" style={{ width: `${Math.min(Math.max(session.progress, 0), 100)}%` }} />
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -1065,128 +1149,168 @@ function AutomationView() {
   )
 }
 
-function TutorialView() {
-  const demoProject = tutorialProjects[0]
-  const demoCampaign = tutorialCampaigns[0]
-  const demoAnalytics = tutorialAnalytics
-
-  return (
-    <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
-          eyebrow="Tutorial"
-          title="Static demo dataset for onboarding"
-          description="This is the only place the seeded sample data appears. Everything else is fed by the backend."
-        />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className={cardClass}>
-            <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/80">Sample project</p>
-            <h3 className="mt-3 font-display text-3xl tracking-tight text-white">{demoProject.name}</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-300">{demoProject.tagline}</p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <MiniFact label="Status" value={demoProject.status} />
-              <MiniFact label="Platforms" value={demoProject.platforms.join(', ')} />
-              <MiniFact label="Updated" value={demoProject.lastUpdated} />
-            </div>
-          </div>
-
-          <div className={cardClass}>
-            <p className="text-xs uppercase tracking-[0.3em] text-sky-200/80">Sample analytics</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <MetricTile label="Engagement" value={formatNumber(demoAnalytics.summary.engagement)} icon={ChartColumn} />
-              <MetricTile label="CTR" value={`${demoAnalytics.summary.ctr}%`} icon={LineChart} />
-            </div>
-            <div className="mt-5">
-              <TimelineChart points={demoAnalytics.timeline} />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Demo campaign" title={demoCampaign.name} />
-          <div className="mt-5 space-y-3">
-            <MiniFact label="Goal" value={demoCampaign.goal} />
-            <MiniFact label="Audience" value={demoCampaign.audience} />
-            <MiniFact label="Platforms" value={demoCampaign.platforms.join(', ')} />
-          </div>
-          <div className="mt-5 space-y-3">
-            {demoCampaign.days.map((day) => (
-              <div key={day.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs uppercase tracking-[0.28em] text-slate-400">Day {day.day}</span>
-                  <span className="text-xs text-slate-300">{day.scheduledTime}</span>
-                </div>
-                <p className="mt-2 font-medium text-white">{day.title}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-300">{day.content}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className={cardClass}>
-          <SectionHeading eyebrow="What this demonstrates" title="Tutorial purpose" />
-          <div className="mt-5 grid gap-3">
-            <InfoBanner
-              icon={BadgeCheck}
-              title="Clear separation"
-              description="The demo dataset is isolated here so the production views stay tied to the backend."
-            />
-            <InfoBanner
-              icon={Globe}
-              title="Backend contract"
-              description="Projects, campaigns, analytics, platform catalogs, and automation requests now come from live endpoints."
-            />
-            <InfoBanner
-              icon={Rocket}
-              title="Human approval"
-              description="Automation assistance still keeps verification and CAPTCHA with the user, exactly as intended."
-            />
-          </div>
-
-          <div className="mt-6 rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Sample platforms</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {tutorialPlatforms.map((platform) => (
-                <span
-                  key={platform.id}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
-                >
-                  {platform.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </article>
-      </section>
-    </div>
-  )
-}
-
 function SettingsView() {
+  const [companyName, setCompanyName] = useState('Virel')
+  const [legalEntityName, setLegalEntityName] = useState('Virel Labs Pte. Ltd.')
+  const [companyStartDate, setCompanyStartDate] = useState('2026-06-01')
+  const [websiteUrl, setWebsiteUrl] = useState('https://virel.example.com')
+  const [supportEmail, setSupportEmail] = useState('support@virel.example.com')
+  const [phoneNumber, setPhoneNumber] = useState('+65 9123 4567')
+  const [country, setCountry] = useState('Singapore')
+  const [timezone, setTimezone] = useState('Asia/Singapore')
+  const [displayName, setDisplayName] = useState('Virel')
+  const [brandHandle, setBrandHandle] = useState('@virel')
+  const [brandBio, setBrandBio] = useState('Launch student projects with polished branding and guided setup.')
+  const [profileImageUrl, setProfileImageUrl] = useState('https://cdn.example.com/virel-avatar.png')
+  const [backupEmail, setBackupEmail] = useState('ops@virel.example.com')
+  const [googleAccountEmail, setGoogleAccountEmail] = useState('founders@virel.example.com')
+  const [googleLinkStatus, setGoogleLinkStatus] = useState<'Not linked' | 'Pending' | 'Linked'>('Not linked')
+  const [linkedinUrl, setLinkedinUrl] = useState('https://www.linkedin.com/company/virel')
+  const [instagramHandle, setInstagramHandle] = useState('@virel')
+  const [xHandle, setXHandle] = useState('@virel')
+  const [tiktokHandle, setTiktokHandle] = useState('@virel')
+  const [redditUsername, setRedditUsername] = useState('u/VirelHQ')
   const [emailNotifications, setEmailNotifications] = useState(true)
-  const [themeMode, setThemeMode] = useState<'System' | 'Light' | 'Dark'>('System')
   const [defaultTone, setDefaultTone] = useState('Confident')
+  const [themeMode, setThemeMode] = useState<'System' | 'Light' | 'Dark'>('System')
+
+  const requiredCount = [
+    companyName,
+    legalEntityName,
+    companyStartDate,
+    websiteUrl,
+    supportEmail,
+    phoneNumber,
+    country,
+    timezone,
+    displayName,
+    brandHandle,
+    brandBio,
+    profileImageUrl,
+    backupEmail,
+    googleAccountEmail,
+    linkedinUrl,
+    instagramHandle,
+    xHandle,
+    tiktokHandle,
+    redditUsername,
+  ].filter(Boolean).length
+
+  function startGoogleLink() {
+    setGoogleLinkStatus('Pending')
+    window.open('https://accounts.google.com/', '_blank', 'noopener,noreferrer')
+  }
 
   return (
     <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
+      <section className={`${paperCard} p-6 sm:p-7`}>
+        <SectionHeader
           eyebrow="Settings"
-          title="Workspace preferences"
-          description="A few controls to round out the corporate shell. These can later wire into user-specific settings."
+          title="Identity studio"
+          description="Store the business and identity details needed to create and verify official social accounts."
         />
+
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
-          <SettingsCard title="Profile">
-            <label className="block">
-              <span className="text-sm font-medium text-slate-200">Name</span>
-              <input className={inputClass} defaultValue="Avery Chen" />
+          <SettingsCard title="Business profile">
+            <Field label="Company name" description="The public brand name shown on profiles and pages.">
+              <input className={inputField} value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+            </Field>
+            <Field label="Legal entity name" description="The registered company name used for verification.">
+              <input className={inputField} value={legalEntityName} onChange={(event) => setLegalEntityName(event.target.value)} />
+            </Field>
+            <Field label="Company start date" description="The date the business or project officially started.">
+              <input className={inputField} type="date" value={companyStartDate} onChange={(event) => setCompanyStartDate(event.target.value)} />
+            </Field>
+            <Field label="Website" description="Your main public website or landing page URL.">
+              <input className={inputField} value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} />
+            </Field>
+            <Field label="Support email" description="Use the inbox you want platform teams to contact.">
+              <input className={inputField} value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} />
+            </Field>
+            <Field label="Phone number" description="The number used for verification or recovery.">
+              <input className={inputField} value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} />
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Country" description="Where the business is based.">
+                <input className={inputField} value={country} onChange={(event) => setCountry(event.target.value)} />
+              </Field>
+              <Field label="Timezone" description="Use the timezone where the team operates.">
+                <input className={inputField} value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+              </Field>
+            </div>
+          </SettingsCard>
+
+          <SettingsCard title="Brand identity">
+            <Field label="Display name" description="How the account name appears publicly.">
+              <input className={inputField} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </Field>
+            <Field label="Primary handle" description="The default username you want to secure.">
+              <input className={inputField} value={brandHandle} onChange={(event) => setBrandHandle(event.target.value)} />
+            </Field>
+            <Field label="Brand bio" description="A short summary of the project or company.">
+              <textarea className={textareaField} value={brandBio} onChange={(event) => setBrandBio(event.target.value)} />
+            </Field>
+            <Field label="Profile image URL" description="Hosted image link for the account avatar.">
+              <input className={inputField} value={profileImageUrl} onChange={(event) => setProfileImageUrl(event.target.value)} />
+            </Field>
+            <Field label="Backup email" description="A recovery inbox if the primary account is locked.">
+              <input className={inputField} value={backupEmail} onChange={(event) => setBackupEmail(event.target.value)} />
+            </Field>
+            <Field label="Default campaign tone" description="The default voice used for generated content.">
+              <input className={inputField} value={defaultTone} onChange={(event) => setDefaultTone(event.target.value)} />
+            </Field>
+            <label className="flex items-center gap-3 rounded-[24px] border-[2px] border-[#2c211b] bg-white px-4 py-3 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+              <input checked={emailNotifications} onChange={(event) => setEmailNotifications(event.target.checked)} type="checkbox" />
+              <span className="text-sm font-medium text-[#5f554a]">Email campaign and verification alerts</span>
             </label>
-            <label className="block">
-              <span className="text-sm font-medium text-slate-200">Email</span>
-              <input className={inputClass} defaultValue="avery@virel.local" />
-            </label>
+          </SettingsCard>
+
+          <SettingsCard title="Google connection">
+            <Field label="Google account email" description="The Google account used to link and sign in.">
+              <input className={inputField} value={googleAccountEmail} onChange={(event) => setGoogleAccountEmail(event.target.value)} />
+            </Field>
+            <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Status</p>
+              <p className="mt-2 text-sm font-black text-[#1f1814]">{googleLinkStatus}</p>
+              <p className="mt-2 text-sm leading-6 text-[#5f554a]">
+                Opens Google sign-in in a new tab so the user stays in control of the linking step.
+              </p>
+            </div>
+            <DashboardAction onClick={startGoogleLink} tone="blue">
+              <ExternalLink className="h-4 w-4" />
+              Link Google account
+            </DashboardAction>
+            <button className={secondaryLink} type="button" onClick={() => setGoogleLinkStatus('Not linked')}>
+              Reset Google status
+            </button>
+          </SettingsCard>
+
+          <SettingsCard title="Platform handles">
+            <Field label="Instagram handle" description="Example: @virel">
+              <input className={inputField} value={instagramHandle} onChange={(event) => setInstagramHandle(event.target.value)} />
+            </Field>
+            <Field label="X handle" description="Example: @virel">
+              <input className={inputField} value={xHandle} onChange={(event) => setXHandle(event.target.value)} />
+            </Field>
+            <Field label="TikTok handle" description="Example: @virel">
+              <input className={inputField} value={tiktokHandle} onChange={(event) => setTiktokHandle(event.target.value)} />
+            </Field>
+            <Field label="LinkedIn URL" description="The company page link used for verification or references.">
+              <input className={inputField} value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} />
+            </Field>
+            <Field label="Reddit username" description="Example: u/VirelHQ">
+              <input className={inputField} value={redditUsername} onChange={(event) => setRedditUsername(event.target.value)} />
+            </Field>
+          </SettingsCard>
+
+          <SettingsCard title="Readiness">
+            <div className="rounded-[26px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
+              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">Required fields</p>
+              <p className="font-display mt-3 text-5xl font-black text-[#1f1814]">{requiredCount}</p>
+              <p className="mt-2 text-sm leading-6 text-[#5f554a]">Core identity fields filled for account setup.</p>
+            </div>
+            <InfoBanner icon={ShieldCheck} title="Compliance first" description="Keep verification, CAPTCHA, and account approval with the user." />
+            <InfoBanner icon={BadgeCheck} title="One official identity" description="Use these fields to keep the brand consistent across platforms." />
           </SettingsCard>
 
           <SettingsCard title="Theme">
@@ -1194,13 +1318,11 @@ function SettingsView() {
               {(['System', 'Light', 'Dark'] as const).map((mode) => (
                 <button
                   key={mode}
-                  className={`rounded-2xl border px-3 py-3 text-sm font-medium transition ${
-                    themeMode === mode
-                      ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
-                      : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                  type="button"
+                  className={`rounded-[22px] border-[2px] border-[#2c211b] px-3 py-3 text-sm font-black uppercase tracking-[0.18em] shadow-[4px_4px_12px_rgba(45,33,26,0.04)] ${
+                    themeMode === mode ? 'bg-[#d9f1e5] text-[#1f1814]' : 'bg-white text-[#1f1814]'
                   }`}
                   onClick={() => setThemeMode(mode)}
-                  type="button"
                 >
                   {mode}
                 </button>
@@ -1208,31 +1330,8 @@ function SettingsView() {
             </div>
           </SettingsCard>
 
-          <SettingsCard title="Notifications">
-            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <input checked={emailNotifications} onChange={(event) => setEmailNotifications(event.target.checked)} type="checkbox" />
-              <span className="text-sm text-slate-200">Email summaries and campaign alerts</span>
-            </label>
-          </SettingsCard>
-
-          <SettingsCard title="AI tone">
-            <label className="block">
-              <span className="text-sm font-medium text-slate-200">Default campaign tone</span>
-              <input className={inputClass} value={defaultTone} onChange={(event) => setDefaultTone(event.target.value)} />
-            </label>
-          </SettingsCard>
-
-          <SettingsCard title="Status">
-            <InfoBanner
-              icon={ShieldCheck}
-              title="Compliance first"
-              description="Virel keeps launch assistance user-controlled and avoids bypassing verification flows."
-            />
-          </SettingsCard>
-
           <SettingsCard title="Danger zone">
-            <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-400/15">
-              <Trash2 className="h-4 w-4" />
+            <button className="rounded-full border-[2px] border-[#2c211b] bg-[#fde2cf] px-5 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
               Archive workspace
             </button>
           </SettingsCard>
@@ -1242,7 +1341,36 @@ function SettingsView() {
   )
 }
 
-function ProjectEditorModal({
+function SettingsCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className={`${insetCard} p-5`}>
+      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#b97fd6]">{title}</p>
+      <div className="mt-4 grid gap-4">{children}</div>
+    </section>
+  )
+}
+
+function Field({
+  label,
+  children,
+  className = '',
+  description,
+}: {
+  label: string
+  children: ReactNode
+  className?: string
+  description?: string
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="text-[11px] font-black uppercase tracking-[0.28em] text-[#b97fd6]">{label}</span>
+      {description && <span className="mt-1 block text-xs leading-5 text-[#6b625a]">{description}</span>}
+      <div className="mt-2">{children}</div>
+    </label>
+  )
+}
+
+function ProjectModal({
   initial,
   onCancel,
   onSave,
@@ -1279,56 +1407,41 @@ function ProjectEditorModal({
         }}
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="block md:col-span-2">
-            <span className="text-sm font-medium text-slate-200">Project name</span>
-            <input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-
-          <label className="block md:col-span-2">
-            <span className="text-sm font-medium text-slate-200">Description</span>
-            <textarea className={textareaClass} value={description} onChange={(event) => setDescription(event.target.value)} />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-slate-200">Target audience</span>
-            <input className={inputClass} value={targetAudience} onChange={(event) => setTargetAudience(event.target.value)} />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-slate-200">Goal</span>
-            <input className={inputClass} value={goal} onChange={(event) => setGoal(event.target.value)} />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-slate-200">Status</span>
-            <select className={selectClass} value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
+          <Field label="Project name" description="The public name of the project." className="md:col-span-2">
+            <input className={inputField} value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <Field label="Project description" description="What the project is and why people should care." className="md:col-span-2">
+            <textarea className={textareaField} value={description} onChange={(event) => setDescription(event.target.value)} />
+          </Field>
+          <Field label="Target audience" description="Who this is for. Example: students, founders, creators.">
+            <input className={inputField} value={targetAudience} onChange={(event) => setTargetAudience(event.target.value)} />
+          </Field>
+          <Field label="Project goal" description="The main outcome you want this project to achieve.">
+            <input className={inputField} value={goal} onChange={(event) => setGoal(event.target.value)} />
+          </Field>
+          <Field label="Project status" description="Current stage of the project, not the campaign.">
+            <select className={inputField} value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
               {PROJECT_STATUS_OPTIONS.map((option) => (
                 <option key={option}>{option}</option>
               ))}
             </select>
-          </label>
-
-          <label className="block md:col-span-2">
-            <span className="text-sm font-medium text-slate-200">Repo URL</span>
-            <input className={inputClass} value={repoUrl} onChange={(event) => setRepoUrl(event.target.value)} />
-          </label>
-
-          <label className="block md:col-span-2">
-            <span className="text-sm font-medium text-slate-200">Demo URL</span>
-            <input className={inputClass} value={demoUrl} onChange={(event) => setDemoUrl(event.target.value)} />
-          </label>
-
-          <label className="block md:col-span-2">
-            <span className="text-sm font-medium text-slate-200">Logo URL</span>
-            <input className={inputClass} value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} />
-          </label>
+          </Field>
+          <Field label="Repo URL" description="Optional source code or workspace link." className="md:col-span-2">
+            <input className={inputField} value={repoUrl} onChange={(event) => setRepoUrl(event.target.value)} />
+          </Field>
+          <Field label="Demo URL" description="Optional live demo or preview link." className="md:col-span-2">
+            <input className={inputField} value={demoUrl} onChange={(event) => setDemoUrl(event.target.value)} />
+          </Field>
+          <Field label="Logo URL" description="Optional project logo or brand asset URL." className="md:col-span-2">
+            <input className={inputField} value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} />
+          </Field>
         </div>
 
         <div className="mt-2 flex flex-wrap justify-end gap-3">
-          <button className={secondaryButton} onClick={onCancel} type="button">
+          <button className={secondaryLink} type="button" onClick={onCancel}>
             Cancel
           </button>
-          <button className={primaryButton} type="submit">
+          <button className="rounded-full border-[2px] border-[#2c211b] bg-[#2c211b] px-5 py-3 text-sm font-black text-[#fffaf4] shadow-[6px_6px_16px_rgba(45,33,26,0.06)]" type="submit">
             Save project
           </button>
         </div>
@@ -1340,19 +1453,19 @@ function ProjectEditorModal({
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#2c211b]/45 p-4 backdrop-blur-[2px]"
       onClick={(event) => {
-        if (event.currentTarget === event.target) onClose()
+        if (event.target === event.currentTarget) onClose()
       }}
       role="presentation"
     >
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-white/10 bg-slate-950/95 p-6 shadow-[0_30px_100px_rgba(2,6,23,0.7)]">
-        <div className="flex items-center justify-between gap-3">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[34px] border-[2px] border-[#2c211b] bg-[#fffaf4] p-6 shadow-[14px_14px_24px_rgba(45,33,26,0.08)]">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Modal</p>
-            <h3 className="mt-2 font-display text-2xl tracking-tight text-white">{title}</h3>
+            <p className="text-[11px] font-black uppercase tracking-[0.32em] text-[#b97fd6]">Modal</p>
+            <h3 className="font-display mt-2 text-3xl font-black tracking-tight text-[#1f1814]">{title}</h3>
           </div>
-          <button className={ghostButton} onClick={onClose} type="button">
+          <button className={secondaryLink} type="button" onClick={onClose}>
             Close
           </button>
         </div>
@@ -1362,214 +1475,68 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 
-function ProjectCard({
-  project,
-  onDelete,
-  onEdit,
-}: {
-  project: Project
-  onDelete: (id: string) => Promise<void>
-  onEdit: (project: Project) => void
-}) {
+function StatusBadge({ status }: { status: string }) {
   return (
-    <article className={cardClass}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Project</p>
-          <h3 className="mt-2 font-display text-2xl tracking-tight text-white">{project.name}</h3>
-        </div>
-        <StatusPill status={project.status} />
-      </div>
-
-      <p className="mt-4 text-sm leading-6 text-slate-300">{project.description || project.tagline}</p>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <MiniFact label="Audience" value={project.targetAudience || 'Not set'} />
-        <MiniFact label="Goal" value={project.goal || 'Not set'} />
-      </div>
-
-      <div className="mt-5 space-y-3">
-        <ProgressMeter value={project.progress} />
-        <div className="flex items-center justify-between gap-3 text-sm text-slate-400">
-          <span>Updated {formatDateString(project.updatedAt || project.lastUpdated)}</span>
-          <span>{project.platforms.length ? project.platforms.join(', ') : 'Backend first'}</span>
-        </div>
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-2">
-        {project.repoUrl && (
-          <a className={secondaryButton} href={project.repoUrl} rel="noreferrer" target="_blank">
-            <ExternalLink className="h-4 w-4" />
-            Repo
-          </a>
-        )}
-        {project.demoUrl && (
-          <a className={secondaryButton} href={project.demoUrl} rel="noreferrer" target="_blank">
-            <Globe className="h-4 w-4" />
-            Demo
-          </a>
-        )}
-        <button className={ghostButton} onClick={() => onEdit(project)} type="button">
-          <PencilLine className="h-4 w-4" />
-          Edit
-        </button>
-        <button className={ghostButton} onClick={() => void onDelete(project.id)} type="button">
-          <Trash2 className="h-4 w-4" />
-          Delete
-        </button>
-      </div>
-    </article>
-  )
-}
-
-function CampaignCard({ campaign }: { campaign: Campaign }) {
-  return (
-    <article className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Campaign</p>
-          <h3 className="mt-2 font-display text-2xl tracking-tight text-white">{campaign.name}</h3>
-        </div>
-        <StatusPill status={campaign.status} />
-      </div>
-
-      <p className="mt-4 text-sm leading-6 text-slate-300">{campaign.summary || campaign.audience || campaign.goal}</p>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <MiniFact label="Goal" value={campaign.goal} />
-        <MiniFact label="Tone" value={campaign.tone || 'Confident'} />
-        <MiniFact label="Platforms" value={campaign.platforms.join(', ')} />
-      </div>
-    </article>
-  )
-}
-
-function PlatformCard({ platform, selected }: { platform: Platform; selected?: boolean }) {
-  return (
-    <div
-      className={`rounded-2xl border p-4 transition ${
-        selected ? 'border-emerald-400/30 bg-emerald-400/10' : 'border-white/10 bg-white/5'
-      }`}
+    <span
+      className={`inline-flex max-w-full items-center justify-center rounded-full border-[2px] border-[#2c211b] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-center sm:px-3 sm:text-[11px] sm:tracking-[0.2em] ${statusTone(status)}`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium text-white">{platform.name}</span>
-        <StatusPill status={platform.status} />
-      </div>
-      <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
-      <p className="mt-3 text-sm leading-6 text-slate-400">{platform.notes || platform.automation}</p>
-      <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-        <ShieldCheck className="h-4 w-4 text-emerald-300" />
-        {platform.phoneRequired ? 'Phone may be required' : 'Email-friendly'}
-      </div>
-    </div>
+      {status}
+    </span>
   )
 }
 
-function SessionCard({ session }: { session: AutomationSession }) {
+function statusTone(status: string) {
+  const normalized = status.toLowerCase()
+  if (normalized.includes('connected') || normalized.includes('live') || normalized.includes('launched')) {
+    return 'bg-[#d9f1e5] text-[#1f1814]'
+  }
+  if (normalized.includes('paused') || normalized.includes('pending') || normalized.includes('scheduled')) {
+    return 'bg-[#fff0bc] text-[#1f1814]'
+  }
+  if (normalized.includes('verification') || normalized.includes('error')) {
+    return 'bg-[#fde2cf] text-[#1f1814]'
+  }
+  return 'bg-white text-[#1f1814]'
+}
+
+function LoadingGrid() {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">{session.platform}</p>
-          <p className="mt-2 font-medium text-white">{session.step}</p>
+    <div className="grid gap-5">
+      {[1, 2].map((row) => (
+        <div key={row} className="grid gap-5 xl:grid-cols-2">
+          <div className="h-[320px] rounded-[34px] border-[2px] border-[#2c211b] bg-white/70 shadow-[10px_10px_20px_rgba(45,33,26,0.04)] animate-pulse" />
+          <div className="h-[320px] rounded-[34px] border-[2px] border-[#2c211b] bg-white/70 shadow-[10px_10px_20px_rgba(45,33,26,0.04)] animate-pulse" />
         </div>
-        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
-          {session.status}
-        </span>
-      </div>
-      <div className="mt-3 h-2 rounded-full bg-slate-800">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
-          style={{ width: `${Math.min(Math.max(session.progress, 0), 100)}%` }}
-        />
-      </div>
-      <p className="mt-3 text-sm text-slate-400">Project {session.projectId}</p>
+      ))}
     </div>
   )
 }
 
-function PlatformChooser({
-  selected,
-  onToggle,
-}: {
-  selected: PlatformName[]
-  onToggle: (platform: PlatformName) => void
-}) {
+function EmptyState({ title, description, compact = false }: { title: string; description?: string; compact?: boolean }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-      {platformNames.map((platform) => {
-        const active = selected.includes(platform)
-        return (
-          <button
-            key={platform}
-            className={`rounded-2xl border px-4 py-3 text-left text-sm font-medium transition ${
-              active
-                ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
-                : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
-            }`}
-            onClick={() => onToggle(platform)}
-            type="button"
-          >
-            {platform}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function SettingsCard({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className={softCardClass}>
-      <p className="text-xs uppercase tracking-[0.28em] text-slate-400">{title}</p>
-      <div className="mt-4 space-y-4">{children}</div>
-    </section>
-  )
-}
-
-function InfoBanner({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: LucideIcon
-  title: string
-  description: string
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className={`rounded-[28px] border-[2px] border-dashed border-[#2c211b] bg-white/70 ${compact ? 'p-4' : 'p-6'} shadow-[6px_6px_16px_rgba(45,33,26,0.04)]`}>
       <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-400/10 text-emerald-300">
-          <Icon className="h-4 w-4" />
-        </span>
+        <div className="grid h-11 w-11 place-items-center rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff] text-sm font-black text-[#1f1814] shadow-[4px_4px_12px_rgba(45,33,26,0.04)]">
+          V
+        </div>
         <div>
-          <p className="font-medium text-white">{title}</p>
-          <p className="mt-1 text-sm leading-6 text-slate-300">{description}</p>
+          <h4 className="font-display text-2xl font-black tracking-tight text-[#1f1814]">{title}</h4>
+          {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-[#5f554a]">{description}</p>}
         </div>
       </div>
     </div>
   )
 }
 
-function SectionHeading({
-  eyebrow,
-  title,
-  description,
-  action,
-}: {
-  eyebrow: string
-  title: string
-  description?: string
-  action?: ReactNode
-}) {
+function ErrorState({ title, message, retry }: { title: string; message: string; retry: () => void }) {
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-      <div>
-        <p className="text-xs uppercase tracking-[0.32em] text-slate-400">{eyebrow}</p>
-        <h2 className="mt-2 font-display text-3xl tracking-tight text-white">{title}</h2>
-        {description && <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{description}</p>}
-      </div>
-      {action && <div>{action}</div>}
+    <div className="rounded-[34px] border-[2px] border-[#2c211b] bg-[#fde2cf] p-6 text-[#1f1814] shadow-[10px_10px_20px_rgba(45,33,26,0.06)]">
+      <p className="text-[11px] font-black uppercase tracking-[0.32em] text-[#1f1814]/70">Error</p>
+      <h4 className="font-display mt-2 text-3xl font-black tracking-tight">{title}</h4>
+      <p className="mt-3 max-w-3xl text-sm leading-6 text-[#5f554a]">{message}</p>
+      <button className="mt-5 rounded-full border-[2px] border-[#2c211b] bg-white px-5 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.05)]" onClick={retry} type="button">
+        Retry
+      </button>
     </div>
   )
 }
@@ -1578,167 +1545,86 @@ function MetricTile({
   label,
   value,
   icon: Icon,
+  tone,
 }: {
   label: string
   value: string
   icon: LucideIcon
+  tone: 'blue' | 'yellow' | 'green' | 'purple'
 }) {
+  const palette = {
+    blue: 'bg-[#d2e5ff]',
+    yellow: 'bg-[#fff0bc]',
+    green: 'bg-[#d9f1e5]',
+    purple: 'bg-[#e4dbff]',
+  }[tone]
+
   return (
-    <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+    <div className={`rounded-[24px] border-[2px] border-[#2c211b] p-4 text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.05)] ${palette}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">{label}</p>
-          <p className="mt-3 font-display text-3xl tracking-tight text-white">{value}</p>
+          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#61564e]">{label}</p>
+          <p className="font-display mt-3 text-3xl font-black tracking-tight">{value}</p>
         </div>
-        <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-400/10 text-emerald-300">
-          <Icon className="h-4 w-4" />
-        </span>
+        <Icon className="h-5 w-5" />
       </div>
     </div>
   )
 }
 
-function MiniFact({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-      <p className="text-xs uppercase tracking-[0.28em] text-slate-400">{label}</p>
-      <p className="mt-2 text-sm font-medium text-white">{value}</p>
+    <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-white px-4 py-4 shadow-[6px_6px_16px_rgba(45,33,26,0.04)]">
+      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#b97fd6]">{label}</p>
+      <p className="mt-2 text-sm font-bold leading-6 text-[#1f1814]">{value}</p>
     </div>
   )
 }
 
-function DataRow({ label, value }: { label: string; value: string }) {
+function ProgressBar({ value }: { value: number }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-      <span className="text-sm text-slate-300">{label}</span>
-      <span className="font-medium text-white">{value}</span>
-    </div>
-  )
-}
-
-function ProgressMeter({ value }: { value: number }) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.24em] text-slate-400">
+    <div className="w-full">
+      <div className="mb-2 flex items-center justify-between text-[11px] font-black uppercase tracking-[0.28em] text-[#6b625a]">
         <span>Launch progress</span>
         <span>{value}%</span>
       </div>
-      <div className="h-2 rounded-full bg-slate-800">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
-          style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }}
-        />
+      <div className="h-4 rounded-full border-[2px] border-[#2c211b] bg-[#fffaf4]">
+        <div className="h-full rounded-full bg-[#f7d9ea]" style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }} />
       </div>
     </div>
   )
 }
 
-function StatusPill({ status }: { status: string }) {
-  return <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(status)}`}>{status}</span>
-}
-
-function TimelineChart({ points }: { points: Analytics['timeline'] }) {
-  const max = Math.max(...points.map((point) => point.engagement), 1)
-
+function InfoBanner({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) {
   return (
-    <div className="space-y-4">
-      {points.map((point) => (
-        <div key={point.label} className="grid grid-cols-[48px_minmax(0,1fr)_64px] items-center gap-3">
-          <span className="text-xs uppercase tracking-[0.28em] text-slate-400">{point.label}</span>
-          <div className="h-3 rounded-full bg-slate-800">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
-              style={{ width: `${(point.engagement / max) * 100}%` }}
-            />
-          </div>
-          <span className="text-right text-sm font-medium text-white">{formatNumber(point.engagement)}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function LoadingGrid() {
-  return (
-    <div className="grid gap-5">
-      {[1, 2, 3].map((index) => (
-        <div key={index} className="animate-pulse rounded-[28px] border border-white/10 bg-white/5 p-6">
-          <div className="h-4 w-28 rounded-full bg-white/10" />
-          <div className="mt-5 grid gap-4 lg:grid-cols-3">
-            {[1, 2, 3].map((item) => (
-              <div key={item} className="h-24 rounded-2xl bg-white/10" />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function EmptyState({
-  title,
-  description,
-  compact = false,
-}: {
-  title: string
-  description?: string
-  compact?: boolean
-}) {
-  return (
-    <div className={`rounded-[28px] border border-dashed border-white/10 bg-white/[0.03] ${compact ? 'p-5' : 'p-8'}`}>
+    <div className="rounded-[24px] border-[2px] border-[#2c211b] bg-white p-4 shadow-[6px_6px_16px_rgba(45,33,26,0.05)]">
       <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-400/10 text-emerald-300">
-          <Ghost className="h-4 w-4" />
+        <span className="grid h-11 w-11 place-items-center rounded-full border-[2px] border-[#2c211b] bg-[#d2e5ff]">
+          <Icon className="h-4 w-4 text-[#1f1814]" />
         </span>
         <div>
-          <h3 className="font-display text-2xl tracking-tight text-white">{title}</h3>
-          {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{description}</p>}
+          <p className="font-black text-[#1f1814]">{title}</p>
+          <p className="mt-1 text-sm leading-6 text-[#5f554a]">{description}</p>
         </div>
       </div>
     </div>
   )
 }
 
-function ErrorState({
-  title,
-  message,
-  retry,
-}: {
-  title: string
-  message: string
-  retry: () => void
-}) {
-  return (
-    <div className="rounded-[28px] border border-rose-400/20 bg-rose-400/10 p-6">
-      <p className="text-xs uppercase tracking-[0.3em] text-rose-200/80">Error</p>
-      <h3 className="mt-3 font-display text-2xl tracking-tight text-white">{title}</h3>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-100/80">{message}</p>
-      <button className={`${primaryButton} mt-5 bg-white text-slate-950 hover:bg-slate-100`} onClick={retry} type="button">
-        Retry
-      </button>
-    </div>
-  )
+function inputFieldClass() {
+  return 'w-full rounded-[22px] border-[2px] border-[#2c211b] bg-white px-4 py-3 text-sm font-medium text-[#1f1814] outline-none shadow-[6px_6px_16px_rgba(45,33,26,0.04)] placeholder:text-[#8c8278] focus:border-[#b97fd6]'
 }
 
-function statusTone(status: string) {
-  const normalized = status.toLowerCase()
-  if (normalized.includes('connected') || normalized.includes('live') || normalized.includes('launched')) {
-    return 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
-  }
-  if (normalized.includes('paused') || normalized.includes('pending') || normalized.includes('scheduled')) {
-    return 'border-amber-400/20 bg-amber-400/10 text-amber-200'
-  }
-  if (normalized.includes('verification') || normalized.includes('error')) {
-    return 'border-rose-400/20 bg-rose-400/10 text-rose-200'
-  }
-  return 'border-white/10 bg-white/5 text-slate-200'
-}
+const inputField = inputFieldClass()
+const textareaField = `${inputField} min-h-[120px] resize-y`
+const secondaryLink =
+  'inline-flex items-center justify-center gap-2 rounded-full border-[2px] border-[#2c211b] bg-white px-4 py-3 text-sm font-black text-[#1f1814] shadow-[6px_6px_16px_rgba(45,33,26,0.04)] transition hover:bg-[#fffaf4]'
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value)
 }
 
-function formatDateString(value?: string) {
+function formatDate(value?: string) {
   if (!value) return 'Today'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value

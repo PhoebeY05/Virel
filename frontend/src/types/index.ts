@@ -50,6 +50,11 @@ export interface GeneratedPost {
   content: string
   status: PostStatus
   engagementEstimate: number
+  likes?: number
+  comments?: number
+  shares?: number
+  clicks?: number
+  ctr?: number
   campaignId?: string
   campaignDayId?: string
   hashtags?: string[]
@@ -84,16 +89,26 @@ export interface AnalyticsPoint {
 
 export interface PlatformAnalytics {
   platform: PlatformName
+  likes: number
+  comments: number
+  shares: number
+  clicks: number
+  ctr: number
   engagement: number
-  growth: number
+  posts: number
 }
 
 export interface TopPost {
   id: string
   title: string
   platform: PlatformName
-  engagement: number
+  likes: number
+  comments: number
+  shares: number
+  clicks: number
   ctr: number
+  engagement: number
+  scheduledAt?: string | null
 }
 
 export interface Analytics {

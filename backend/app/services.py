@@ -41,11 +41,13 @@ from app.schemas import (
     PlatformAccountCreate,
     PlatformAccountRead,
     PlatformAccountUpdate,
+    PlatformStatsRead,
     PostUpdate,
     ProjectCreate,
     ProjectRead,
     ProjectUpdate,
     ReplySuggestionRead,
+    TopPostStatsRead,
 )
 
 
@@ -404,6 +406,17 @@ def get_automation_session(session: Session, session_id: str, user_id: str) -> A
     return automation
 
 
+def list_automation_sessions(session: Session, user_id: str) -> list[AutomationSession]:
+    return list(
+        session.scalars(
+            select(AutomationSession)
+            .join(AutomationSession.project)
+            .where(Project.user_id == user_id)
+            .order_by(AutomationSession.created_at.desc())
+        )
+    )
+
+
 def list_comments_for_post(session: Session, post_id: str, user_id: str) -> list[Comment]:
     ensure_post(session, post_id, user_id)
     return list(session.scalars(select(Comment).where(Comment.post_id == post_id).order_by(Comment.created_at.asc())))
@@ -487,40 +500,115 @@ def _timeline_for_seed(seed: int) -> list[AnalyticsPoint]:
     return points
 
 
-def _aggregate_platform_summary(items: list[tuple[str, int]]) -> tuple[str, list[AnalyticsPoint], dict[str, dict[str, int | float]]]:
+def _aggregate_platform_summary(
+    items: list[tuple[GeneratedPost, int]],
+) -> tuple[str, list[AnalyticsPoint], list[PlatformStatsRead], list[TopPostStatsRead]]:
     if not items:
-        return "n/a", [], {}
-    platform_metrics: dict[str, dict[str, int | float]] = {}
-    for platform, seed in items:
-        platform_metrics[platform] = _mock_platform_metrics(seed)
-    best_platform = max(platform_metrics.items(), key=lambda pair: pair[1]["likes"] + pair[1]["clicks"])[0]
+        return "n/a", [], [], []
+
+    platform_metrics: dict[str, dict[str, float | int]] = defaultdict(
+        lambda: {"likes": 0, "comments": 0, "shares": 0, "clicks": 0, "ctr_total": 0.0, "posts": 0}
+    )
+    top_post_entries: list[tuple[int, int, GeneratedPost, dict[str, int | float]]] = []
+
+    for post, seed in items:
+        metrics = _mock_platform_metrics(seed)
+        platform_entry = platform_metrics[post.platform]
+        platform_entry["likes"] = int(platform_entry["likes"]) + int(metrics["likes"])
+        platform_entry["comments"] = int(platform_entry["comments"]) + int(metrics["comments"])
+        platform_entry["shares"] = int(platform_entry["shares"]) + int(metrics["shares"])
+        platform_entry["clicks"] = int(platform_entry["clicks"]) + int(metrics["clicks"])
+        platform_entry["ctr_total"] = float(platform_entry["ctr_total"]) + float(metrics["ctr"])
+        platform_entry["posts"] = int(platform_entry["posts"]) + 1
+        engagement = int(metrics["likes"]) + int(metrics["comments"]) + int(metrics["shares"]) + int(metrics["clicks"])
+        top_post_entries.append((engagement, int(metrics["clicks"]), post, metrics))
+
+    best_platform = max(platform_metrics.items(), key=lambda pair: int(pair[1]["likes"]) + int(pair[1]["clicks"]))[0]
     timeline_seed = sum(seed for _, seed in items) or 1
-    return best_platform, _timeline_for_seed(timeline_seed), platform_metrics
-
-
-def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
-    campaign = ensure_campaign(session, campaign_id, user_id)
-    platform_items = [
-        (post.platform, _score_seed(campaign.id, post.id, post.platform))
-        for day in campaign.days
-        for post in day.posts
+    platform_stats = [
+        PlatformStatsRead(
+            platform=platform,
+            likes=int(metrics["likes"]),
+            comments=int(metrics["comments"]),
+            shares=int(metrics["shares"]),
+            clicks=int(metrics["clicks"]),
+            ctr=round(float(metrics["ctr_total"]) / max(int(metrics["posts"]), 1), 4),
+            engagement=int(metrics["likes"]) + int(metrics["comments"]) + int(metrics["shares"]) + int(metrics["clicks"]),
+            posts=int(metrics["posts"]),
+        )
+        for platform, metrics in platform_metrics.items()
     ]
-    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
-    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
-    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
-    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
-    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
-    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
+    platform_stats.sort(key=lambda item: (item.engagement, item.clicks), reverse=True)
+
+    top_posts = [
+        TopPostStatsRead(
+            id=post.id,
+            platform=post.platform,
+            title=post.title,
+            likes=int(metrics["likes"]),
+            comments=int(metrics["comments"]),
+            shares=int(metrics["shares"]),
+            clicks=int(metrics["clicks"]),
+            ctr=float(metrics["ctr"]),
+            engagement=engagement,
+            scheduled_at=post.scheduled_at,
+        )
+        for engagement, _clicks, post, metrics in sorted(top_post_entries, key=lambda entry: (entry[0], entry[1]), reverse=True)[:5]
+    ]
+
+    return best_platform, _timeline_for_seed(timeline_seed), platform_stats, top_posts
+
+
+def _count_active_campaigns(campaigns: list[Campaign]) -> int:
+    return sum(1 for campaign in campaigns if campaign.status.lower() != "complete")
+
+
+def _build_summary(
+    *,
+    project_id: str | None,
+    campaign_id: str | None,
+    total_projects: int,
+    active_campaigns: int,
+    items: list[tuple[GeneratedPost, int]],
+) -> AnalyticsDetail:
+    best_platform, timeline, platform_stats, top_posts = _aggregate_platform_summary(items)
+    likes = sum(item.likes for item in platform_stats)
+    comments = sum(item.comments for item in platform_stats)
+    shares = sum(item.shares for item in platform_stats)
+    clicks = sum(item.clicks for item in platform_stats)
+    ctr = round(mean([item.ctr for item in platform_stats]) if platform_stats else 0.0, 4)
+    engagement = likes + comments + shares + clicks
     return AnalyticsDetail(
-        project_id=campaign.project_id,
-        campaign_id=campaign.id,
+        project_id=project_id,
+        campaign_id=campaign_id,
         likes=likes,
         comments=comments,
         shares=shares,
         ctr=ctr,
         clicks=clicks,
+        engagement=engagement,
         best_platform=best_platform,
         engagement_timeline=timeline,
+        active_campaigns=active_campaigns,
+        total_projects=total_projects,
+        platforms=platform_stats,
+        top_posts=top_posts,
+    )
+
+
+def summarize_campaign(session: Session, campaign_id: str, user_id: str) -> AnalyticsDetail:
+    campaign = ensure_campaign(session, campaign_id, user_id)
+    platform_items = [
+        (post, _score_seed(campaign.id, post.id, post.platform))
+        for day in campaign.days
+        for post in day.posts
+    ]
+    return _build_summary(
+        project_id=campaign.project_id,
+        campaign_id=campaign.id,
+        total_projects=1,
+        active_campaigns=1 if campaign.status.lower() != "complete" else 0,
+        items=platform_items,
     )
 
 
@@ -533,31 +621,22 @@ def summarize_project(session: Session, project_id: str, user_id: str) -> Analyt
             .options(selectinload(Campaign.days).selectinload(CampaignDay.posts))
         )
     )
-    platform_items = []
+    platform_items: list[tuple[GeneratedPost, int]] = []
     for campaign in campaigns:
         for day in campaign.days:
             for post in day.posts:
-                platform_items.append((post.platform, _score_seed(project.id, campaign.id, post.id, post.platform)))
-    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
-    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
-    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
-    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
-    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
-    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
-    return AnalyticsDetail(
+                platform_items.append((post, _score_seed(project.id, campaign.id, post.id, post.platform)))
+    return _build_summary(
         project_id=project.id,
         campaign_id=None,
-        likes=likes,
-        comments=comments,
-        shares=shares,
-        ctr=ctr,
-        clicks=clicks,
-        best_platform=best_platform,
-        engagement_timeline=timeline,
+        total_projects=1,
+        active_campaigns=_count_active_campaigns(campaigns),
+        items=platform_items,
     )
 
 
 def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
+    projects = list(session.scalars(select(Project).where(Project.user_id == user_id)))
     campaigns = list(
         session.scalars(
             select(Campaign)
@@ -566,28 +645,22 @@ def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
             .where(Project.user_id == user_id)
         )
     )
-    platform_items = []
+    platform_items: list[tuple[GeneratedPost, int]] = []
     for campaign in campaigns:
         for day in campaign.days:
             for post in day.posts:
-                platform_items.append((post.platform, _score_seed(campaign.id, post.id, post.platform)))
-    best_platform, timeline, platform_metrics = _aggregate_platform_summary(platform_items)
-    likes = sum(int(metrics["likes"]) for metrics in platform_metrics.values())
-    comments = sum(int(metrics["comments"]) for metrics in platform_metrics.values())
-    shares = sum(int(metrics["shares"]) for metrics in platform_metrics.values())
-    clicks = sum(int(metrics["clicks"]) for metrics in platform_metrics.values())
-    ctr = round(mean([float(metrics["ctr"]) for metrics in platform_metrics.values()]) if platform_metrics else 0.0, 4)
-    return AnalyticsDetail(
+                platform_items.append((post, _score_seed(campaign.id, post.id, post.platform)))
+    return _build_summary(
         project_id=None,
         campaign_id=None,
-        likes=likes,
-        comments=comments,
-        shares=shares,
-        ctr=ctr,
-        clicks=clicks,
-        best_platform=best_platform,
-        engagement_timeline=timeline,
+        total_projects=len(projects),
+        active_campaigns=_count_active_campaigns(campaigns),
+        items=platform_items,
     )
+
+
+def list_platform_stats(session: Session, user_id: str) -> list[PlatformStatsRead]:
+    return summarize_all(session, user_id).platforms
 
 
 def list_supported_platforms() -> list[dict[str, object]]:

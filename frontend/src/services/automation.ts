@@ -80,3 +80,8 @@ export async function getAutomationSession(sessionId: string): Promise<Automatio
   const response = await apiRequest<ApiAutomationSession>(`/automation/sessions/${sessionId}`)
   return fromApiAutomationSession(response)
 }
+
+export async function getAutomationSessions(): Promise<AutomationSession[]> {
+  const response = await apiRequest<ApiAutomationSession[]>('/automation/sessions')
+  return response.map(fromApiAutomationSession)
+}

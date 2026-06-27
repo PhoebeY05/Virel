@@ -10,6 +10,7 @@ class Settings(BaseSettings):
         default="sqlite+pysqlite:///./virel.db",
         description="Database connection string",
     )
+    media_dir: str = "./media"
     frontend_url: AnyHttpUrl = "http://localhost:3000"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
@@ -29,4 +30,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

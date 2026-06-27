@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -12,6 +15,7 @@ from app.api.routes.automation import router as automation_router
 from app.api.routes.campaigns import router as campaigns_router
 from app.api.routes.comments import router as comments_router
 from app.api.routes.health import router as health_router
+from app.api.routes.media import router as media_router
 from app.api.routes.platforms import router as platforms_router
 from app.api.routes.projects import router as projects_router
 from app.auth import auth_middleware
@@ -30,6 +34,10 @@ def build_app(settings: Settings | None = None, engine: Engine | None = None) ->
     app.state.settings = settings
     app.state.engine = engine
     app.state.SessionLocal = session_factory
+
+    media_dir = Path(settings.media_dir)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
     app.add_middleware(
         CORSMiddleware,
@@ -75,9 +83,9 @@ def build_app(settings: Settings | None = None, engine: Engine | None = None) ->
     app.include_router(comments_router)
     app.include_router(analytics_router)
     app.include_router(automation_router)
+    app.include_router(media_router)
 
     return app
 
 
 app = build_app()
-
