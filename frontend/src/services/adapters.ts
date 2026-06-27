@@ -110,6 +110,7 @@ const slugToName: Record<string, PlatformName> = {
   tiktok: 'TikTok',
   x: 'X',
   facebook: 'Facebook',
+  xiaohongshu: 'Xiaohongshu',
   discord: 'Discord',
   product_hunt: 'Product Hunt',
   hacker_news: 'Hacker News',
@@ -152,7 +153,7 @@ export function fromApiProject(project: ApiProject): Project {
   return {
     id: project.id,
     name: project.name,
-    tagline: project.description || project.goal || 'Launch-ready student project.',
+    tagline: project.description || project.goal || '',
     status: fromApiProjectStatus(project.status),
     platforms: [],
     progress: project.status?.toLowerCase() === 'launched' ? 94 : project.status?.toLowerCase() === 'active' ? 72 : 38,
@@ -177,7 +178,7 @@ export function fromApiCampaign(campaign: ApiCampaign): Campaign {
     id: campaign.id,
     projectId: campaign.project_id,
     name: campaign.title,
-    audience: campaign.summary || campaign.tone || 'Student launch audience',
+    audience: campaign.summary || campaign.goal,
     goal: campaign.goal,
     platforms: (campaign.platforms ?? []).map(toPlatformName),
     status: fromApiCampaignStatus(campaign.status),
@@ -214,7 +215,6 @@ export function fromApiPost(post: ApiGeneratedPost): GeneratedPost & { scheduled
     title: post.title,
     content: post.content,
     status: fromApiPostStatus(post.status),
-    engagementEstimate: 68,
     hashtags: post.hashtags ?? [],
     callToAction: post.call_to_action ?? '',
     scheduledAt: post.scheduled_at,
@@ -263,7 +263,7 @@ export function fromApiPlatform(platform: ApiSupportedPlatform): Platform | null
     id: platform.slug,
     name,
     status: platform.requires_human_verification ? 'Needs verification' : 'Pending',
-    username: defaultUsername(name),
+    username: '',
     phoneRequired: platform.phone_required === 'required' || platform.phone_required === 'often',
     automation: fromApiAutomationLevel(platform.automation_level),
     notes: platform.notes,
@@ -322,7 +322,7 @@ function formatDate(value?: string) {
 }
 
 function formatTime(value?: string | null) {
-  return value ? value.slice(11, 16) : '09:00'
+  return value ? value.slice(11, 16) : ''
 }
 
 function formatDay(value: string) {
@@ -333,9 +333,3 @@ function toPercent(value: number) {
   return value <= 1 ? Number((value * 100).toFixed(1)) : value
 }
 
-function defaultUsername(platform: PlatformName) {
-  if (platform === 'Reddit') return 'u/StudySnapAI'
-  if (platform === 'Discord') return 'StudySnap Community'
-  if (platform === 'LinkedIn') return 'StudySnap AI'
-  return '@studysnapai'
-}

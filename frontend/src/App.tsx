@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   ArrowRight,
-  BadgeCheck,
   BriefcaseBusiness,
   ChartColumn,
   ChevronRight,
@@ -26,10 +25,10 @@ import {
   WandSparkles,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { platformNames } from './mocks/data'
+import { platformNames } from './constants/platforms'
 import { useAsync } from './hooks/useAsync'
 import { getAnalytics } from './services/analytics'
-import { connectAutomation, createAutomationSession, getPlatforms } from './services/automation'
+import { connectAutomation, createAutomationSession, getPlatforms, launchAutomationSignup, launchPublishBatch } from './services/automation'
 import { generateCampaign, getCampaigns, type GenerateCampaignInput } from './services/campaigns'
 import { createProject, deleteProject, getProjects, updateProject, type ProjectInput } from './services/projects'
 import type {
@@ -72,6 +71,19 @@ const ghostButton = `${buttonBase} border border-transparent bg-transparent text
 const cardClass = 'rounded-[28px] border border-white/10 bg-slate-950/75 p-6 shadow-[0_18px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl'
 const softCardClass = 'rounded-[24px] border border-white/10 bg-white/5 p-5'
 const panelClass = 'rounded-[32px] border border-white/10 bg-white/[0.03] p-6 shadow-[0_20px_90px_rgba(2,6,23,0.45)] backdrop-blur-xl'
+const automationGuidance: Partial<Record<PlatformName, string>> = {
+  Reddit:
+    'Reddit may show CAPTCHA or anti-abuse checks. Virel can prefill visible fields, but verification and final submit stay manual.',
+  LinkedIn:
+    'LinkedIn uses stronger identity checks. Virel can route and prefill visible fields, but identity verification stays manual.',
+  Xiaohongshu:
+    'Xiaohongshu usually requires phone and regional verification. Virel can open the flow, but verification stays manual.',
+  Discord:
+    'Discord is not wired into the browser signup assistant yet. Create the community manually, then track it in Virel.',
+  'Hacker News':
+    'Hacker News should stay manual and low-friction. Create the account normally, then use Virel for launch planning.',
+}
+const unsupportedSignupPlatforms: PlatformName[] = ['Discord', 'Hacker News']
 
 function App() {
   const [view, setView] = useState<View>('Dashboard')
@@ -531,27 +543,35 @@ function CampaignsView() {
   const projectsState = useAsync(getProjects)
   const campaignsState = useAsync(getCampaigns)
   const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [goal, setGoal] = useState('Drive signups and demo requests')
+  const [goal, setGoal] = useState('')
   const [tone, setTone] = useState('Confident')
   const [title, setTitle] = useState('')
-  const [platforms, setPlatforms] = useState<PlatformName[]>(platformNames.slice(0, 3))
+  const [platforms, setPlatforms] = useState<PlatformName[]>([])
   const [generatedCampaign, setGeneratedCampaign] = useState<Campaign | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [publishStatus, setPublishStatus] = useState<string | null>(null)
+  const [isPublishing, setIsPublishing] = useState(false)
 
   const projects = projectsState.data ?? []
   const campaigns = campaignsState.data ?? []
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
 
   const campaignPreview = generatedCampaign ?? campaigns[0]
+  const previewProject = projects.find((project) => project.id === campaignPreview?.projectId) ?? selectedProject
 
   async function handleGenerate() {
     if (!selectedProject || platforms.length === 0) return
     setActionError(null)
 
     try {
+      const campaignGoal = goal || selectedProject.goal
+      if (!campaignGoal) {
+        setActionError('Add a campaign goal before generating.')
+        return
+      }
       const payload: GenerateCampaignInput = {
         projectId: selectedProject.id,
-        goal,
+        goal: campaignGoal,
         platforms,
         tone,
         title: title || `${selectedProject.name} launch sprint`,
@@ -562,6 +582,31 @@ function CampaignsView() {
       campaignsState.setData([campaign, ...campaigns])
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Campaign generation failed.')
+    }
+  }
+
+  async function handlePublishAssistant() {
+    if (!campaignPreview || !previewProject || campaignPreview.posts.length === 0) return
+
+    setActionError(null)
+    setPublishStatus('Starting multi-platform publishing assistant...')
+    setIsPublishing(true)
+
+    try {
+      const result = await launchPublishBatch({
+        projectId: previewProject.id,
+        displayName: previewProject.name,
+        username: normalizeHandle(previewProject.name),
+        bio: previewProject.description || previewProject.tagline,
+        websiteUrl: previewProject.demoUrl ?? previewProject.repoUrl ?? undefined,
+        posts: campaignPreview.posts,
+      })
+      setPublishStatus(`${result.message} PID: ${result.pid}${result.logPath ? ` Log: ${result.logPath}` : ''}`)
+    } catch (error) {
+      setPublishStatus(null)
+      setActionError(error instanceof Error ? error.message : 'Publishing assistant failed to start.')
+    } finally {
+      setIsPublishing(false)
     }
   }
 
@@ -630,7 +675,12 @@ function CampaignsView() {
 
               <label className="block">
                 <span className="text-sm font-medium text-slate-200">Goal</span>
-                <input className={inputClass} value={goal} onChange={(event) => setGoal(event.target.value)} />
+                <input
+                  className={inputClass}
+                  placeholder={selectedProject.goal || 'Campaign goal'}
+                  value={goal}
+                  onChange={(event) => setGoal(event.target.value)}
+                />
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -651,7 +701,12 @@ function CampaignsView() {
 
               <PlatformChooser selected={platforms} onToggle={togglePlatform} />
 
-              <button className={primaryButton} onClick={() => void handleGenerate()} type="button">
+              <button
+                className={primaryButton}
+                disabled={platforms.length === 0 || !(goal || selectedProject.goal)}
+                onClick={() => void handleGenerate()}
+                type="button"
+              >
                 <Sparkles className="h-4 w-4" />
                 Generate campaign
               </button>
@@ -694,6 +749,15 @@ function CampaignsView() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    className={primaryButton}
+                    disabled={isPublishing || campaignPreview.posts.length === 0}
+                    onClick={() => void handlePublishAssistant()}
+                    type="button"
+                  >
+                    <Rocket className="h-4 w-4" />
+                    {isPublishing ? 'Starting...' : 'Start publish assistant'}
+                  </button>
                   <button className={secondaryButton} onClick={() => setGeneratedCampaign(campaignPreview)} type="button">
                     Keep preview
                   </button>
@@ -711,6 +775,11 @@ function CampaignsView() {
             )}
           </div>
         </div>
+        {publishStatus && (
+          <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm leading-6 text-emerald-100">
+            {publishStatus}
+          </p>
+        )}
         {actionError && <p className="mt-4 text-sm text-rose-300">{actionError}</p>}
       </section>
 
@@ -836,8 +905,12 @@ function AnalyticsView() {
                   <p className="mt-2 text-sm leading-6 text-slate-300">{post.content}</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                     <span>{post.platform}</span>
-                    <span>•</span>
-                    <span>{post.engagementEstimate}% fit</span>
+                    {post.scheduledAt && (
+                      <>
+                        <span>-</span>
+                        <span>{formatDateString(post.scheduledAt)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -854,18 +927,27 @@ function AutomationView() {
   const projectsState = useAsync(getProjects)
   const [selectedPlatformId, setSelectedPlatformId] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [username, setUsername] = useState('@studysnapai')
-  const [bio, setBio] = useState('Study smarter, not harder.')
+  const [signupEmail, setSignupEmail] = useState('')
+  const [signupPassword, setSignupPassword] = useState('')
+  const [username, setUsername] = useState('')
+  const [bio, setBio] = useState('')
   const [profileImageUrl, setProfileImageUrl] = useState('')
   const [accountUrl, setAccountUrl] = useState('')
-  const [notes, setNotes] = useState('Prepare the brand assets, then walk the user through verification.')
+  const [notes, setNotes] = useState('')
   const [sessions, setSessions] = useState<AutomationSession[]>([])
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [launchStatus, setLaunchStatus] = useState<string | null>(null)
+  const [isLaunching, setIsLaunching] = useState(false)
 
   const platforms = platformsState.data ?? []
   const projects = projectsState.data ?? []
   const selectedPlatform = platforms.find((platform) => platform.id === selectedPlatformId) ?? platforms[0]
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0]
+  const guidance = selectedPlatform ? automationGuidance[selectedPlatform.name] : null
+  const signupUnsupported = selectedPlatform ? unsupportedSignupPlatforms.includes(selectedPlatform.name) : false
+  const resolvedUsername = selectedProject ? username || normalizeHandle(selectedProject.name) : username
+  const resolvedBio = selectedProject ? bio || selectedProject.description || selectedProject.tagline || selectedProject.goal : bio
+  const resolvedWebsiteUrl = selectedProject?.demoUrl ?? selectedProject?.repoUrl ?? undefined
 
   async function handleRequestConnection() {
     if (!selectedProject || !selectedPlatform) return
@@ -875,8 +957,8 @@ function AutomationView() {
         projectId: selectedProject.id,
         platform: selectedPlatform.name,
         payload: {
-          username,
-          bio,
+          username: resolvedUsername,
+          bio: resolvedBio,
           profile_image_url: profileImageUrl,
           account_url: accountUrl,
           notes,
@@ -900,8 +982,8 @@ function AutomationView() {
         step: 'draft_created',
         progress: 12,
         payload: {
-          username,
-          bio,
+          username: resolvedUsername,
+          bio: resolvedBio,
           profile_image_url: profileImageUrl,
           account_url: accountUrl,
           notes,
@@ -911,6 +993,60 @@ function AutomationView() {
       setSessions((current) => [session, ...current])
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : 'Automation session creation failed.')
+    }
+  }
+
+  async function handleLaunchSignupPrefill() {
+    if (!selectedProject || !selectedPlatform || signupUnsupported) {
+      if (guidance) setLaunchStatus(guidance)
+      return
+    }
+
+    setSessionError(null)
+    setLaunchStatus('Starting signup prefill assistant...')
+    setIsLaunching(true)
+
+    try {
+      const session = await createAutomationSession({
+        projectId: selectedProject.id,
+        platform: selectedPlatform.name,
+        status: 'running',
+        step: 'signup_prefill_browser_started',
+        progress: 20,
+        payload: {
+          signup_method: 'email',
+          email: signupEmail,
+          username: resolvedUsername,
+          display_name: selectedProject.name,
+          bio: resolvedBio,
+          profile_image_url: profileImageUrl,
+          account_url: accountUrl,
+          website_url: resolvedWebsiteUrl,
+          notes,
+        },
+      })
+      setSessions((current) => [session, ...current])
+
+      const launch = await launchAutomationSignup({
+        projectId: selectedProject.id,
+        platform: selectedPlatform.name,
+        email: signupEmail || undefined,
+        password: signupPassword || undefined,
+        username: resolvedUsername,
+        displayName: selectedProject.name,
+        bio: resolvedBio,
+        websiteUrl: resolvedWebsiteUrl,
+        profileImagePath: profileImageUrl || undefined,
+        signupMethod: 'email',
+        holdMs: 300000,
+      })
+
+      setLaunchStatus(`${launch.message} PID: ${launch.pid}${launch.logPath ? ` Log: ${launch.logPath}` : ''}`)
+    } catch (error) {
+      setLaunchStatus(null)
+      setSessionError(error instanceof Error ? error.message : 'Signup prefill launch failed.')
+    } finally {
+      setIsLaunching(false)
     }
   }
 
@@ -940,8 +1076,8 @@ function AutomationView() {
       <section className={panelClass}>
         <SectionHeading
           eyebrow="Automation"
-          title="Guided setup, backed by the real API"
-          description="These requests create automation sessions on the backend. The browser automation layer can pick them up later."
+          title="Guided signup prefill, backed by the real API"
+          description="Open each platform's official signup flow, prefill visible project details, and leave CAPTCHA, verification, missing fields, and final submit with the user."
         />
         <div className="mt-6 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <div className="grid gap-3">
@@ -960,7 +1096,9 @@ function AutomationView() {
                       <span className="font-medium text-white">{platform.name}</span>
                       <StatusPill status={platform.status} />
                     </div>
-                    <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
+                    <p className="mt-2 text-sm text-slate-300">
+                      {platform.username || 'No connected account yet'}
+                    </p>
                   </div>
                   <ChevronRight className="h-4 w-4 text-slate-400" />
                 </div>
@@ -973,7 +1111,7 @@ function AutomationView() {
             <SectionHeading
               eyebrow="Connection brief"
               title={`Setup ${selectedPlatform.name}`}
-              description="Fill in the brand details, then either queue the session or request a connect run."
+              description="Use the selected project as the company identity, then launch a prefilled signup form or record a backend setup session."
             />
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="block sm:col-span-2">
@@ -991,9 +1129,44 @@ function AutomationView() {
                 </select>
               </label>
 
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:col-span-2">
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Signup identity</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Virel opens the official signup page and fills fields it can see. You review the form, fill anything missing, complete verification, and submit manually.
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <MiniFact label="Company name" value={selectedProject.name} />
+                  <MiniFact label="Signup method" value="Prefilled form" />
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Signup email</span>
+                <input
+                  className={inputClass}
+                  value={signupEmail}
+                  onChange={(event) => setSignupEmail(event.target.value)}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-slate-200">Signup password</span>
+                <input
+                  className={inputClass}
+                  type="password"
+                  value={signupPassword}
+                  onChange={(event) => setSignupPassword(event.target.value)}
+                />
+              </label>
+
               <label className="block">
                 <span className="text-sm font-medium text-slate-200">Username</span>
-                <input className={inputClass} value={username} onChange={(event) => setUsername(event.target.value)} />
+                <input
+                  className={inputClass}
+                  placeholder={normalizeHandle(selectedProject.name)}
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                />
               </label>
 
               <label className="block">
@@ -1003,16 +1176,20 @@ function AutomationView() {
 
               <label className="block sm:col-span-2">
                 <span className="text-sm font-medium text-slate-200">Bio</span>
-                <textarea className={textareaClass} value={bio} onChange={(event) => setBio(event.target.value)} />
+                <textarea
+                  className={textareaClass}
+                  placeholder={selectedProject.description || selectedProject.tagline || selectedProject.goal}
+                  value={bio}
+                  onChange={(event) => setBio(event.target.value)}
+                />
               </label>
 
               <label className="block sm:col-span-2">
-                <span className="text-sm font-medium text-slate-200">Profile image URL</span>
+                <span className="text-sm font-medium text-slate-200">Profile image path</span>
                 <input
                   className={inputClass}
                   value={profileImageUrl}
                   onChange={(event) => setProfileImageUrl(event.target.value)}
-                  placeholder="https://..."
                 />
               </label>
 
@@ -1022,7 +1199,24 @@ function AutomationView() {
               </label>
             </div>
 
+            {guidance && (
+              <InfoBanner
+                icon={ShieldCheck}
+                title="Manual setup recommended"
+                description={guidance}
+              />
+            )}
+
             <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                className={primaryButton}
+                disabled={isLaunching}
+                onClick={() => void handleLaunchSignupPrefill()}
+                type="button"
+              >
+                <UserRoundPlus className="h-4 w-4" />
+                {isLaunching ? 'Launching...' : signupUnsupported ? 'Show guidance' : 'Open prefilled signup'}
+              </button>
               <button className={primaryButton} onClick={() => void handleRequestConnection()} type="button">
                 <UserRoundPlus className="h-4 w-4" />
                 Request connect
@@ -1033,6 +1227,7 @@ function AutomationView() {
               </button>
             </div>
 
+            {launchStatus && <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm leading-6 text-emerald-100">{launchStatus}</p>}
             {sessionError && <p className="mt-4 text-sm text-rose-300">{sessionError}</p>}
           </div>
         </div>
@@ -1059,105 +1254,6 @@ function AutomationView() {
               ))}
             </div>
           )}
-        </article>
-      </section>
-    </div>
-  )
-}
-
-function TutorialView() {
-  const demoProject = tutorialProjects[0]
-  const demoCampaign = tutorialCampaigns[0]
-  const demoAnalytics = tutorialAnalytics
-
-  return (
-    <div className="space-y-6">
-      <section className={panelClass}>
-        <SectionHeading
-          eyebrow="Tutorial"
-          title="Static demo dataset for onboarding"
-          description="This is the only place the seeded sample data appears. Everything else is fed by the backend."
-        />
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className={cardClass}>
-            <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/80">Sample project</p>
-            <h3 className="mt-3 font-display text-3xl tracking-tight text-white">{demoProject.name}</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-300">{demoProject.tagline}</p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <MiniFact label="Status" value={demoProject.status} />
-              <MiniFact label="Platforms" value={demoProject.platforms.join(', ')} />
-              <MiniFact label="Updated" value={demoProject.lastUpdated} />
-            </div>
-          </div>
-
-          <div className={cardClass}>
-            <p className="text-xs uppercase tracking-[0.3em] text-sky-200/80">Sample analytics</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <MetricTile label="Engagement" value={formatNumber(demoAnalytics.summary.engagement)} icon={ChartColumn} />
-              <MetricTile label="CTR" value={`${demoAnalytics.summary.ctr}%`} icon={LineChart} />
-            </div>
-            <div className="mt-5">
-              <TimelineChart points={demoAnalytics.timeline} />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <article className={cardClass}>
-          <SectionHeading eyebrow="Demo campaign" title={demoCampaign.name} />
-          <div className="mt-5 space-y-3">
-            <MiniFact label="Goal" value={demoCampaign.goal} />
-            <MiniFact label="Audience" value={demoCampaign.audience} />
-            <MiniFact label="Platforms" value={demoCampaign.platforms.join(', ')} />
-          </div>
-          <div className="mt-5 space-y-3">
-            {demoCampaign.days.map((day) => (
-              <div key={day.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs uppercase tracking-[0.28em] text-slate-400">Day {day.day}</span>
-                  <span className="text-xs text-slate-300">{day.scheduledTime}</span>
-                </div>
-                <p className="mt-2 font-medium text-white">{day.title}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-300">{day.content}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className={cardClass}>
-          <SectionHeading eyebrow="What this demonstrates" title="Tutorial purpose" />
-          <div className="mt-5 grid gap-3">
-            <InfoBanner
-              icon={BadgeCheck}
-              title="Clear separation"
-              description="The demo dataset is isolated here so the production views stay tied to the backend."
-            />
-            <InfoBanner
-              icon={Globe}
-              title="Backend contract"
-              description="Projects, campaigns, analytics, platform catalogs, and automation requests now come from live endpoints."
-            />
-            <InfoBanner
-              icon={Rocket}
-              title="Human approval"
-              description="Automation assistance still keeps verification and CAPTCHA with the user, exactly as intended."
-            />
-          </div>
-
-          <div className="mt-6 rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Sample platforms</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {tutorialPlatforms.map((platform) => (
-                <span
-                  key={platform.id}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
-                >
-                  {platform.name}
-                </span>
-              ))}
-            </div>
-          </div>
         </article>
       </section>
     </div>
@@ -1455,7 +1551,7 @@ function PlatformCard({ platform, selected }: { platform: Platform; selected?: b
         <span className="font-medium text-white">{platform.name}</span>
         <StatusPill status={platform.status} />
       </div>
-      <p className="mt-2 text-sm text-slate-300">{platform.username}</p>
+      <p className="mt-2 text-sm text-slate-300">{platform.username || 'No connected account yet'}</p>
       <p className="mt-3 text-sm leading-6 text-slate-400">{platform.notes || platform.automation}</p>
       <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
         <ShieldCheck className="h-4 w-4 text-emerald-300" />
@@ -1736,6 +1832,11 @@ function statusTone(status: string) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value)
+}
+
+function normalizeHandle(value: string) {
+  const handle = value.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24)
+  return handle ? `@${handle}` : ''
 }
 
 function formatDateString(value?: string) {

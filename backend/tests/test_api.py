@@ -132,7 +132,8 @@ def test_analytics_endpoints(client: TestClient) -> None:
     assert response.status_code == 200
     summary = response.json()
     assert "likes" in summary
-    assert len(summary["engagement_timeline"]) == 7
+    assert summary["likes"] == 0
+    assert summary["engagement_timeline"] == []
 
     response = client.get(f"/analytics/projects/{project['id']}")
     assert response.status_code == 200

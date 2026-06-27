@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4.1-mini"
     auth_enabled: bool = False
     clerk_jwks_url: str | None = None
-    demo_user_id: str = "demo-user"
-    demo_user_email: str = "demo@virel.local"
-    demo_user_name: str = "Demo User"
+    local_user_id: str = "local-user"
+    local_user_email: str = "local@virel.local"
+    local_user_name: str = "Local User"
 
     model_config = SettingsConfigDict(
         env_file=".env",

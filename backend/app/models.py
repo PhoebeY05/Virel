@@ -32,7 +32,7 @@ class User(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    auth_provider: Mapped[str] = mapped_column(String(50), default="demo", nullable=False)
+    auth_provider: Mapped[str] = mapped_column(String(50), default="local", nullable=False)
 
     projects: Mapped[list["Project"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
 

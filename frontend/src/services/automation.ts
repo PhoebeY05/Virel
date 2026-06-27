@@ -1,9 +1,10 @@
-import type { AutomationSession, Platform, PlatformName } from '../types'
+import type { AutomationSession, GeneratedPost, Platform, PlatformName } from '../types'
 import {
   fromApiAutomationSession,
   fromApiPlatform,
   type ApiAutomationSession,
   type ApiSupportedPlatform,
+  toPlatformSlug,
 } from './adapters'
 import { apiRequest } from './api'
 
@@ -25,9 +26,96 @@ export interface AutomationSessionCreateInput {
   payload?: Record<string, unknown>
 }
 
+export interface AutomationLaunchInput {
+  projectId: string
+  platform: PlatformName
+  email?: string
+  password?: string
+  username: string
+  displayName: string
+  bio?: string
+  websiteUrl?: string
+  profileImagePath?: string
+  signupMethod?: 'email' | 'google'
+  holdMs?: number
+}
+
+export interface AutomationLaunchResult {
+  status: string
+  pid: number
+  platform: string
+  message: string
+  logPath?: string
+}
+
+export interface PublishBatchInput {
+  projectId: string
+  displayName: string
+  username: string
+  bio?: string
+  websiteUrl?: string
+  profileImagePath?: string
+  posts: GeneratedPost[]
+}
+
 export async function getPlatforms(): Promise<Platform[]> {
   const response = await apiRequest<ApiSupportedPlatform[]>('/platforms')
   return response.map(fromApiPlatform).filter((platform): platform is Platform => platform !== null)
+}
+
+export async function launchAutomationSignup(input: AutomationLaunchInput): Promise<AutomationLaunchResult> {
+  const platform = toPlatformSlug(input.platform).replace('product_hunt', 'producthunt')
+  return apiRequest<AutomationLaunchResult>('/automation/prefill-signup', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: input.projectId,
+      platform,
+      email: input.email,
+      password: input.password,
+      username: input.username,
+      displayName: input.displayName,
+      bio: input.bio,
+      websiteUrl: input.websiteUrl,
+      profileImagePath: input.profileImagePath,
+      signupMethod: input.signupMethod ?? 'email',
+      holdMs: input.holdMs ?? 300000,
+    }),
+  })
+}
+
+export async function launchPublishBatch(input: PublishBatchInput): Promise<AutomationLaunchResult> {
+  const supportedPosts = input.posts
+    .map((post) => ({
+      post,
+      platform: toPlatformSlug(post.platform).replace('product_hunt', 'producthunt'),
+    }))
+    .filter(({ platform }) =>
+      ['instagram', 'facebook', 'x', 'reddit', 'linkedin', 'tiktok', 'xiaohongshu', 'producthunt'].includes(platform),
+    )
+
+  if (supportedPosts.length === 0) {
+    throw new Error('No generated posts are currently supported by the browser publishing assistant.')
+  }
+
+  return apiRequest<AutomationLaunchResult>('/automation/publish-batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: input.projectId,
+      displayName: input.displayName,
+      username: input.username,
+      bio: input.bio,
+      websiteUrl: input.websiteUrl,
+      profileImagePath: input.profileImagePath,
+      posts: supportedPosts.map(({ post, platform }) => ({
+        campaignId: post.campaignId ?? post.projectId,
+        postId: post.id,
+        accountId: `${platform}-connected-account`,
+        platform,
+        text: [post.content, post.hashtags?.join(' '), post.callToAction].filter(Boolean).join('\n\n'),
+        mediaPaths: [],
+      })),
+    }),
+  })
 }
 
 export async function connectAutomation(input: AutomationConnectInput): Promise<AutomationSession> {

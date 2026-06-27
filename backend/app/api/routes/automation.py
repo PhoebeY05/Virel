@@ -29,15 +29,38 @@ PlatformName = Literal[
 ]
 
 
-class AutomationSmokeRequest(BaseModel):
+class AutomationSignupPrefillRequest(BaseModel):
+    projectId: str = Field(alias="projectId")
     platform: PlatformName = "reddit"
-    signupMethod: Literal["email", "google"] = "google"
+    signupMethod: Literal["email", "google"] = "email"
     email: str | None = None
-    username: str = "vireltest"
+    username: str
     password: str | None = None
-    displayName: str = Field(default="Virel Test Project", alias="displayName")
-    bio: str | None = "Testing Virel's guided setup assistant."
+    displayName: str = Field(alias="displayName")
+    bio: str | None = None
+    websiteUrl: str | None = Field(default=None, alias="websiteUrl")
+    profileImagePath: str | None = Field(default=None, alias="profileImagePath")
     holdMs: int = 300_000
+
+
+class AutomationPublishPost(BaseModel):
+    campaignId: str = Field(alias="campaignId")
+    postId: str = Field(alias="postId")
+    accountId: str | None = Field(default=None, alias="accountId")
+    platform: PlatformName
+    text: str
+    mediaPaths: list[str] = Field(default_factory=list, alias="mediaPaths")
+    linkUrl: str | None = Field(default=None, alias="linkUrl")
+
+
+class AutomationPublishBatchRequest(BaseModel):
+    projectId: str = Field(alias="projectId")
+    displayName: str = Field(alias="displayName")
+    username: str
+    bio: str | None = None
+    websiteUrl: str | None = Field(default=None, alias="websiteUrl")
+    profileImagePath: str | None = Field(default=None, alias="profileImagePath")
+    posts: list[AutomationPublishPost]
 
 
 @router.post("/automation/sessions", response_model=AutomationSessionRead, status_code=201)
@@ -81,29 +104,24 @@ def patch_automation(
     return update_automation_session(db, session_id, user.id, payload)
 
 
-@router.post("/automation/test-setup")
-def start_automation_smoke_test(payload: AutomationSmokeRequest) -> dict[str, int | str]:
+def _automation_dir() -> Path:
     repo_root = Path(__file__).resolve().parents[4]
-    automation_dir = repo_root / "automation"
+    automation_dir = Path(os.environ.get("AUTOMATION_DIR", repo_root / "automation")).resolve()
 
     if not automation_dir.exists():
         raise HTTPException(status_code=500, detail="Automation directory was not found.")
 
-    command = [
-        "npm.cmd" if os.name == "nt" else "npm",
-        "run",
-        "smoke",
-        "--",
-        payload.model_dump_json(by_alias=True),
-    ]
+    return automation_dir
 
+
+def _start_automation_process(command: list[str], automation_dir: Path, log_prefix: str, failure_label: str) -> tuple[int, Path]:
     env = os.environ.copy()
     env.setdefault("HEADLESS", "false")
     env.setdefault("SLOW_MO_MS", "150")
 
     logs_dir = automation_dir / "logs"
     logs_dir.mkdir(exist_ok=True)
-    log_path = logs_dir / f"smoke-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    log_path = logs_dir / f"{log_prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
     try:
         log_file = log_path.open("w", encoding="utf-8")
@@ -118,13 +136,52 @@ def start_automation_smoke_test(payload: AutomationSmokeRequest) -> dict[str, in
         )
         log_file.close()
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to start automation: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to start {failure_label}: {exc}") from exc
+
+    return process.pid, log_path
+
+
+@router.post("/automation/prefill-signup")
+def start_signup_prefill(payload: AutomationSignupPrefillRequest) -> dict[str, int | str]:
+    automation_dir = _automation_dir()
+
+    command = [
+        "npm.cmd" if os.name == "nt" else "npm",
+        "run",
+        "prefill-signup",
+        "--",
+        payload.model_dump_json(by_alias=True),
+    ]
+
+    pid, log_path = _start_automation_process(command, automation_dir, "prefill-signup", "signup prefill")
 
     return {
         "status": "started",
-        "pid": process.pid,
+        "pid": pid,
         "platform": payload.platform,
         "logPath": str(log_path),
-        "message": "A headed browser should open shortly. Complete verification manually if the platform asks.",
+        "message": "Signup prefill assistant started. Review the opened form, fill missing verification details, and submit manually.",
+    }
+
+
+@router.post("/automation/publish-batch")
+def start_publish_batch(payload: AutomationPublishBatchRequest) -> dict[str, int | str]:
+    automation_dir = _automation_dir()
+
+    command = [
+        "npm.cmd" if os.name == "nt" else "npm",
+        "run",
+        "publish-batch",
+        "--",
+        payload.model_dump_json(by_alias=True),
+    ]
+
+    pid, log_path = _start_automation_process(command, automation_dir, "publish", "publishing assistant")
+
+    return {
+        "status": "started",
+        "pid": pid,
+        "logPath": str(log_path),
+        "message": "Publishing assistant started. Review each opened composer and publish manually when ready.",
     }
 

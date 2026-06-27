@@ -21,12 +21,12 @@ class CurrentUser:
     auth_provider: str
 
 
-def demo_user(settings: Settings) -> CurrentUser:
+def local_dev_user(settings: Settings) -> CurrentUser:
     return CurrentUser(
-        id=settings.demo_user_id,
-        email=settings.demo_user_email,
-        name=settings.demo_user_name,
-        auth_provider="demo",
+        id=settings.local_user_id,
+        email=settings.local_user_email,
+        name=settings.local_user_name,
+        auth_provider="local",
     )
 
 
@@ -63,11 +63,11 @@ def auth_middleware(settings: Settings):
 
     async def middleware(request: Request, call_next):
         if not settings.auth_enabled:
-            request.state.current_user = demo_user(settings)
+            request.state.current_user = local_dev_user(settings)
             return await call_next(request)
 
         if request.url.path in public_paths or request.url.path.startswith("/static"):
-            request.state.current_user = demo_user(settings)
+            request.state.current_user = local_dev_user(settings)
             return await call_next(request)
 
         authorization = request.headers.get("authorization", "")

@@ -1,7 +1,9 @@
 import { BackendClient } from "./api/backendClient";
 import { AccountSetupService } from "./services/accountSetupService";
+import { BatchPublishingService } from "./services/batchPublishingService";
 import { PublishingService } from "./services/publishingService";
 import { SmokeTestService } from "./services/smokeTestService";
+import { SignupPrefillService } from "./services/signupPrefillService";
 import { AccountSetupSchema, PlatformNameSchema, PostSchema } from "./types/platform";
 import { z } from "zod";
 
@@ -15,6 +17,20 @@ const SmokeTestInputSchema = AccountSetupSchema.pick({
   signupMethod: true
 }).extend({
   holdMs: z.number().int().min(5_000).max(900_000).optional()
+});
+
+const SignupPrefillInputSchema = AccountSetupSchema.extend({
+  holdMs: z.number().int().min(5_000).max(900_000).optional()
+});
+
+const BatchPublishInputSchema = z.object({
+  projectId: z.string(),
+  displayName: z.string(),
+  username: z.string(),
+  bio: z.string().optional(),
+  websiteUrl: z.string().url().optional(),
+  profileImagePath: z.string().optional(),
+  posts: z.array(PostSchema).min(1)
 });
 
 async function main(): Promise<void> {
@@ -54,6 +70,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "prefill-signup") {
+    const input = SignupPrefillInputSchema.parse(parseJsonArg(args[0], "signup prefill JSON"));
+    const { holdMs, ...setup } = input;
+    const result = await new SignupPrefillService().prefillSignup(setup, holdMs);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "publish-batch") {
+    const input = parseJsonArg(args[0], "publish batch JSON");
+    const results = await new BatchPublishingService().publishAll(BatchPublishInputSchema.parse(input));
+    console.log(JSON.stringify({ results }, null, 2));
+    return;
+  }
+
   if (command === "publish-from-backend") {
     const [projectId, campaignId, platformName] = args;
     const platform = PlatformNameSchema.parse(platformName);
@@ -87,8 +118,10 @@ function printUsage(): void {
 
 Commands:
   npm run setup -- '<account setup json>'
+  npm run prefill-signup -- '<account setup json with optional holdMs>'
   npm run smoke -- '<smoke test json>'
   npm run publish -- '<account setup json>' '<post json>'
+  npm run publish-batch -- '<publish batch json>'
   npm run dev -- setup-from-backend <projectId> <platform>
   npm run dev -- publish-from-backend <projectId> <campaignId> <platform>
 `);

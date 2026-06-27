@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "setup": "tsx src/index.ts setup",
+    "prefill-signup": "tsx src/index.ts prefill-signup",
     "smoke": "tsx src/index.ts smoke",
     "publish": "tsx src/index.ts publish",
     "typecheck": "tsc --noEmit",

@@ -5,6 +5,7 @@ export type PlatformName =
   | 'TikTok'
   | 'X'
   | 'Facebook'
+  | 'Xiaohongshu'
   | 'Discord'
   | 'Product Hunt'
   | 'Hacker News'
@@ -49,7 +50,6 @@ export interface GeneratedPost {
   title: string
   content: string
   status: PostStatus
-  engagementEstimate: number
   campaignId?: string
   campaignDayId?: string
   hashtags?: string[]
