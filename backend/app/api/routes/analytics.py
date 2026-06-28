@@ -19,7 +19,7 @@ def get_analytics_summary(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> AnalyticsDetail:
     user = ensure_user(db, current_user)
-    return summarize_all(db, settings, user.id)
+    return summarize_all(db, user.id)
 
 
 @router.get("/analytics", response_model=AnalyticsDetail)
@@ -29,7 +29,7 @@ def get_analytics(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> AnalyticsDetail:
     user = ensure_user(db, current_user)
-    return summarize_all(db, settings, user.id)
+    return summarize_all(db, user.id)
 
 
 @router.get("/analytics/projects/{project_id}", response_model=AnalyticsDetail)
@@ -61,4 +61,4 @@ def get_platform_analytics(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[PlatformStatsRead]:
     user = ensure_user(db, current_user)
-    return list_platform_stats(db, settings, user.id)
+    return list_platform_stats(db, user.id)

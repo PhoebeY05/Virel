@@ -701,6 +701,8 @@ def _build_summary(
     comments = sum(item.comments for item in platform_stats)
     shares = sum(item.shares for item in platform_stats)
     clicks = sum(item.clicks for item in platform_stats)
+    views = 0
+    followers = 0
     ctr = round(mean([item.ctr for item in platform_stats]) if platform_stats else 0.0, 4)
     engagement = likes + comments + shares + clicks
     return AnalyticsDetail(
@@ -712,12 +714,12 @@ def _build_summary(
         views=views,
         followers=followers,
         engagement=engagement,
-        best_platform=platforms[0].platform if platforms else "n/a",
+        best_platform=best_platform,
         engagement_timeline=timeline,
         active_campaigns=active_campaigns,
         total_projects=total_projects,
-        platforms=platforms,
-        top_posts=[],
+        platforms=platform_stats,
+        top_posts=top_posts,
     )
 
 
@@ -779,7 +781,6 @@ def summarize_project(
     )
     return _build_summary(
         project_id=project.id,
-        active_campaigns=sum(1 for campaign in campaigns if campaign.status.lower() in {"draft", "scheduled", "live"}),
         total_projects=1,
         active_campaigns=_count_active_campaigns(campaigns),
         snapshots=snapshots,
@@ -806,8 +807,8 @@ def summarize_all(session: Session, user_id: str) -> AnalyticsDetail:
     )
 
 
-def list_platform_stats(session: Session, settings: Settings, user_id: str) -> list[PlatformStatsRead]:
-    return summarize_all(session, settings, user_id).platforms
+def list_platform_stats(session: Session, user_id: str) -> list[PlatformStatsRead]:
+    return summarize_all(session, user_id).platforms
 
 
 def list_supported_platforms() -> list[dict[str, object]]:
